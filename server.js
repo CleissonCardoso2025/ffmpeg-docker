@@ -48,27 +48,40 @@ app.post('/convert/audio/to/wav', upload.single('file'), (req, res) => {
     .save(output);
 });
 
+// Endpoint: Converter para OGG
+app.post('/convert/audio/to/ogg', upload.single('file'), (req, res) => {
+  const output = `/tmp/output-${Date.now()}.ogg`;
+  ffmpeg(req.file.path)
+    .toFormat('ogg')
+    .audioCodec('libvorbis')
+    .on('end', () => {
+      res.download(output, () => cleanupFiles([req.file.path, output]));
+    })
+    .on('error', (err) => {
+      cleanupFiles([req.file.path]);
+      res.status(500).json({ error: err.message });
+    })
+    .save(output);
+});
+
 // Endpoint: Normalizar e converter para MP3 44100Hz com volume personalizável
 app.post('/audio/normalize-mp3', upload.single('file'), (req, res) => {
   const output = `/tmp/normalized-mp3-${Date.now()}.mp3`;
   
-  // Parâmetros personalizáveis
-  const loudness = req.body.loudness || -16; // -23 a -13 (maior = mais alto)
-  const truePeak = req.body.truePeak || -1.5; // -2 a -0.5 (maior = mais alto)
-  const lra = req.body.lra || 11; // 1 a 20 (menor = mais comprimido)
-  const volumeBoost = req.body.volumeBoost || 1.0; // 1.0 a 2.0 (multiplicador extra)
+  const loudness = req.body.loudness || -16;
+  const truePeak = req.body.truePeak || -1.5;
+  const lra = req.body.lra || 11;
+  const volumeBoost = req.body.volumeBoost || 1.0;
+  const bitrate = req.body.bitrate || '192k';
   
   const filters = [];
   
-  // Adiciona compressor se volumeBoost > 1.2
   if (volumeBoost > 1.2) {
     filters.push('acompressor=threshold=0.05:ratio=10:attack=100:release=500');
   }
   
-  // Normalização
   filters.push(`loudnorm=I=${loudness}:TP=${truePeak}:LRA=${lra}`);
   
-  // Volume boost extra se solicitado
   if (volumeBoost != 1.0) {
     filters.push(`volume=${volumeBoost}`);
   }
@@ -76,8 +89,139 @@ app.post('/audio/normalize-mp3', upload.single('file'), (req, res) => {
   ffmpeg(req.file.path)
     .audioFilters(filters)
     .audioFrequency(44100)
-    .audioBitrate('192k')
+    .audioBitrate(bitrate)
+    .audioCodec('libmp3lame')
     .toFormat('mp3')
+    .on('end', () => {
+      res.download(output, () => cleanupFiles([req.file.path, output]));
+    })
+    .on('error', (err) => {
+      cleanupFiles([req.file.path]);
+      res.status(500).json({ error: err.message });
+    })
+    .save(output);
+});
+
+// Endpoint: Normalizar e converter para OGG 44100Hz
+app.post('/audio/normalize-ogg', upload.single('file'), (req, res) => {
+  const output = `/tmp/normalized-ogg-${Date.now()}.ogg`;
+  
+  const loudness = req.body.loudness || -16;
+  const truePeak = req.body.truePeak || -1.5;
+  const lra = req.body.lra || 11;
+  const volumeBoost = req.body.volumeBoost || 1.0;
+  const bitrate = req.body.bitrate || '192k';
+  
+  const filters = [];
+  
+  if (volumeBoost > 1.2) {
+    filters.push('acompressor=threshold=0.05:ratio=10:attack=100:release=500');
+  }
+  
+  filters.push(`loudnorm=I=${loudness}:TP=${truePeak}:LRA=${lra}`);
+  
+  if (volumeBoost != 1.0) {
+    filters.push(`volume=${volumeBoost}`);
+  }
+  
+  ffmpeg(req.file.path)
+    .audioFilters(filters)
+    .audioFrequency(44100)
+    .audioCodec('libvorbis')
+    .audioBitrate(bitrate)
+    .toFormat('ogg')
+    .on('end', () => {
+      res.download(output, () => cleanupFiles([req.file.path, output]));
+    })
+    .on('error', (err) => {
+      cleanupFiles([req.file.path]);
+      res.status(500).json({ error: err.message });
+    })
+    .save(output);
+});
+
+// Endpoint: Reverb + Normalizar + Volume + MP3 (TUDO EM UM)
+app.post('/audio/reverb-normalize-mp3', upload.single('file'), (req, res) => {
+  const output = `/tmp/reverb-normalized-mp3-${Date.now()}.mp3`;
+  
+  const decay = req.body.decay || 0.5;
+  const delay = req.body.delay || 50;
+  const loudness = req.body.loudness || -13;
+  const truePeak = req.body.truePeak || -0.5;
+  const lra = req.body.lra || 5;
+  const volumeBoost = req.body.volumeBoost || 3.0;
+  const bitrate = req.body.bitrate || '256k';
+  
+  const filters = [];
+  
+  // Reverb
+  filters.push(`aecho=0.8:0.9:${delay}:${decay}`);
+  
+  // Compressor
+  if (volumeBoost > 1.2) {
+    filters.push('acompressor=threshold=0.05:ratio=10:attack=100:release=500');
+  }
+  
+  // Normalização
+  filters.push(`loudnorm=I=${loudness}:TP=${truePeak}:LRA=${lra}`);
+  
+  // Volume boost
+  if (volumeBoost != 1.0) {
+    filters.push(`volume=${volumeBoost}`);
+  }
+  
+  ffmpeg(req.file.path)
+    .audioFilters(filters)
+    .audioFrequency(44100)
+    .audioBitrate(bitrate)
+    .audioCodec('libmp3lame')
+    .toFormat('mp3')
+    .on('end', () => {
+      res.download(output, () => cleanupFiles([req.file.path, output]));
+    })
+    .on('error', (err) => {
+      cleanupFiles([req.file.path]);
+      res.status(500).json({ error: err.message });
+    })
+    .save(output);
+});
+
+// Endpoint: Reverb + Normalizar + Volume + OGG (TUDO EM UM)
+app.post('/audio/reverb-normalize-ogg', upload.single('file'), (req, res) => {
+  const output = `/tmp/reverb-normalized-ogg-${Date.now()}.ogg`;
+  
+  const decay = req.body.decay || 0.5;
+  const delay = req.body.delay || 50;
+  const loudness = req.body.loudness || -13;
+  const truePeak = req.body.truePeak || -0.5;
+  const lra = req.body.lra || 5;
+  const volumeBoost = req.body.volumeBoost || 3.0;
+  const bitrate = req.body.bitrate || '256k';
+  
+  const filters = [];
+  
+  // Reverb
+  filters.push(`aecho=0.8:0.9:${delay}:${decay}`);
+  
+  // Compressor
+  if (volumeBoost > 1.2) {
+    filters.push('acompressor=threshold=0.05:ratio=10:attack=100:release=500');
+  }
+  
+  // Normalização
+  filters.push(`loudnorm=I=${loudness}:TP=${truePeak}:LRA=${lra}`);
+  
+  // Volume boost
+  if (volumeBoost != 1.0) {
+    filters.push(`volume=${volumeBoost}`);
+  }
+  
+  ffmpeg(req.file.path)
+    .audioFilters(filters)
+    .audioFrequency(44100)
+    .audioBitrate(bitrate)
+    .audioCodec('libvorbis')
+    .toFormat('ogg')
     .on('end', () => {
       res.download(output, () => cleanupFiles([req.file.path, output]));
     })
@@ -111,8 +255,8 @@ app.post('/audio/mix', upload.fields([{name:'audio1'},{name:'audio2'}]), (req, r
 // Endpoint: Adicionar Reverb
 app.post('/audio/reverb', upload.single('file'), (req, res) => {
   const output = `/tmp/reverb-${Date.now()}.wav`;
-  const decay = req.body.decay || 0.8;
-  const delay = req.body.delay || 1000;
+  const decay = req.body.decay || 0.5;
+  const delay = req.body.delay || 50;
   
   ffmpeg(req.file.path)
     .audioFilters(`aecho=0.8:0.9:${delay}:${decay}`)
@@ -252,7 +396,11 @@ app.get('/', (req, res) => {
     endpoints: [
       'POST /convert/audio/to/mp3',
       'POST /convert/audio/to/wav',
-      'POST /audio/normalize-mp3 - Normaliza e converte para MP3 44100Hz (loudness, truePeak, lra, volumeBoost)',
+      'POST /convert/audio/to/ogg',
+      'POST /audio/normalize-mp3 - Normaliza e converte para MP3 44100Hz (loudness, truePeak, lra, volumeBoost, bitrate)',
+      'POST /audio/normalize-ogg - Normaliza e converte para OGG 44100Hz (loudness, truePeak, lra, volumeBoost, bitrate)',
+      'POST /audio/reverb-normalize-mp3 - Reverb + Normaliza + Volume + MP3 256k (decay, delay, volumeBoost, bitrate)',
+      'POST /audio/reverb-normalize-ogg - Reverb + Normaliza + Volume + OGG 256k (decay, delay, volumeBoost, bitrate)',
       'POST /audio/mix - Mix 2 áudios (audio1, audio2)',
       'POST /audio/reverb - Adiciona reverb (file, decay, delay)',
       'POST /audio/compress - Compressor dinâmico (file, threshold, ratio, attack, release)',

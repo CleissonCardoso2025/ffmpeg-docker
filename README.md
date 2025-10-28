@@ -1,23 +1,21 @@
 # FFmpeg Audio API
 
-API REST para processamento avançado de áudio usando FFmpeg.
+API REST completa para processamento avançado de áudio usando FFmpeg. Desenvolvida com Node.js, Express e fluent-ffmpeg.
 
-## Endpoints Disponíveis
+## 🎵 Características
 
-- `POST /convert/audio/to/mp3` - Converte para MP3
-- `POST /convert/audio/to/wav` - Converte para WAV
-- `POST /audio/mix` - Mix de 2 áudios
-- `POST /audio/reverb` - Adiciona reverb
-- `POST /audio/compress` - Compressor dinâmico
-- `POST /audio/normalize` - Normalização
-- `POST /audio/fade` - Fade in/out
-- `POST /audio/eq` - Equalização
-- `POST /audio/crossfade` - Crossfade entre áudios
-- `POST /audio/gate` - Remove ruído de fundo
-- `POST /probe` - Informações do arquivo
+- **Conversão de formatos**: MP3, WAV, OGG
+- **Normalização de volume**: Ajuste automático de loudness com EBU R128
+- **Reverb personalizável**: Adicione efeito de reverberação
+- **Compressor dinâmico**: Controle de dinâmica de áudio
+- **Mix de áudios**: Combine múltiplos arquivos
+- **Equalização**: Ajuste de graves e agudos
+- **Fade in/out**: Transições suaves
+- **Gate**: Remoção de ruído de fundo
+- **Crossfade**: Transição entre áudios
+- **Processamento combinado**: Reverb + Normalização + Conversão em uma única chamada
 
-## Deploy no Dokploy
+## 🚀 Instalação
 
-1. Conecte seu repositório GitHub no Dokploy
-2. Selecione Docker Compose como tipo
-3. Deploy automático
+### Deploy com Docker
+
