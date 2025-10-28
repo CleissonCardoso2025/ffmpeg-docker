@@ -48,6 +48,25 @@ app.post('/convert/audio/to/wav', upload.single('file'), (req, res) => {
     .save(output);
 });
 
+// Endpoint: Normalizar e converter para MP3 44100Hz
+app.post('/audio/normalize-mp3', upload.single('file'), (req, res) => {
+  const output = `/tmp/normalized-mp3-${Date.now()}.mp3`;
+  
+  ffmpeg(req.file.path)
+    .audioFilters('loudnorm=I=-16:TP=-1.5:LRA=11')
+    .audioFrequency(44100)
+    .audioBitrate('192k')
+    .toFormat('mp3')
+    .on('end', () => {
+      res.download(output, () => cleanupFiles([req.file.path, output]));
+    })
+    .on('error', (err) => {
+      cleanupFiles([req.file.path]);
+      res.status(500).json({ error: err.message });
+    })
+    .save(output);
+});
+
 // Endpoint: Mix de 2 áudios
 app.post('/audio/mix', upload.fields([{name:'audio1'},{name:'audio2'}]), (req, res) => {
   const output = `/tmp/mix-${Date.now()}.wav`;
@@ -212,6 +231,7 @@ app.get('/', (req, res) => {
     endpoints: [
       'POST /convert/audio/to/mp3',
       'POST /convert/audio/to/wav',
+      'POST /audio/normalize-mp3 - Normaliza e converte para MP3 44100Hz',
       'POST /audio/mix - Mix 2 áudios (audio1, audio2)',
       'POST /audio/reverb - Adiciona reverb (file, decay, delay)',
       'POST /audio/compress - Compressor dinâmico (file, threshold, ratio, attack, release)',
