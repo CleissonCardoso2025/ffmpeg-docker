@@ -48,12 +48,33 @@ app.post('/convert/audio/to/wav', upload.single('file'), (req, res) => {
     .save(output);
 });
 
-// Endpoint: Normalizar e converter para MP3 44100Hz
+// Endpoint: Normalizar e converter para MP3 44100Hz com volume personalizável
 app.post('/audio/normalize-mp3', upload.single('file'), (req, res) => {
   const output = `/tmp/normalized-mp3-${Date.now()}.mp3`;
   
+  // Parâmetros personalizáveis
+  const loudness = req.body.loudness || -16; // -23 a -13 (maior = mais alto)
+  const truePeak = req.body.truePeak || -1.5; // -2 a -0.5 (maior = mais alto)
+  const lra = req.body.lra || 11; // 1 a 20 (menor = mais comprimido)
+  const volumeBoost = req.body.volumeBoost || 1.0; // 1.0 a 2.0 (multiplicador extra)
+  
+  const filters = [];
+  
+  // Adiciona compressor se volumeBoost > 1.2
+  if (volumeBoost > 1.2) {
+    filters.push('acompressor=threshold=0.05:ratio=10:attack=100:release=500');
+  }
+  
+  // Normalização
+  filters.push(`loudnorm=I=${loudness}:TP=${truePeak}:LRA=${lra}`);
+  
+  // Volume boost extra se solicitado
+  if (volumeBoost != 1.0) {
+    filters.push(`volume=${volumeBoost}`);
+  }
+  
   ffmpeg(req.file.path)
-    .audioFilters('loudnorm=I=-16:TP=-1.5:LRA=11')
+    .audioFilters(filters)
     .audioFrequency(44100)
     .audioBitrate('192k')
     .toFormat('mp3')
@@ -227,11 +248,11 @@ app.post('/probe', upload.single('file'), (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     name: 'FFmpeg Audio API',
-    version: '1.0.0',
+    version: '2.0.0',
     endpoints: [
       'POST /convert/audio/to/mp3',
       'POST /convert/audio/to/wav',
-      'POST /audio/normalize-mp3 - Normaliza e converte para MP3 44100Hz',
+      'POST /audio/normalize-mp3 - Normaliza e converte para MP3 44100Hz (loudness, truePeak, lra, volumeBoost)',
       'POST /audio/mix - Mix 2 áudios (audio1, audio2)',
       'POST /audio/reverb - Adiciona reverb (file, decay, delay)',
       'POST /audio/compress - Compressor dinâmico (file, threshold, ratio, attack, release)',
