@@ -280,6 +280,45 @@ app.post('/audio/mix', upload.fields([{name:'audio1'},{name:'audio2'}]), (req, r
     .save(output);
 });
 
+// Endpoint: Concatenar áudios (um depois do outro em sequência)
+app.post('/audio/concat', upload.array('audios', 10), (req, res) => {
+  const format = req.body.format || 'mp3';
+  const output = `/tmp/concat-audio-${Date.now()}.${format}`;
+  const listFile = `/tmp/concat-audio-list-${Date.now()}.txt`;
+
+  if (!req.files || req.files.length < 2) {
+    return res.status(400).json({ error: 'Envie pelo menos 2 arquivos de áudio (campo: audios).' });
+  }
+
+  // Criar arquivo de lista para concat
+  const fileList = req.files.map(f => `file '${f.path}'`).join('\n');
+  fs.writeFileSync(listFile, fileList);
+
+  const cmd = ffmpeg()
+    .input(listFile)
+    .inputOptions(['-f concat', '-safe 0']);
+
+  if (format === 'mp3') {
+    cmd.audioCodec('libmp3lame').audioBitrate('192k').toFormat('mp3');
+  } else if (format === 'ogg') {
+    cmd.audioCodec('libvorbis').toFormat('ogg');
+  } else {
+    cmd.toFormat('wav');
+  }
+
+  cmd
+    .on('end', () => {
+      const filePaths = req.files.map(f => f.path);
+      res.download(output, () => cleanupFiles([...filePaths, listFile, output]));
+    })
+    .on('error', (err) => {
+      const filePaths = req.files.map(f => f.path);
+      cleanupFiles([...filePaths, listFile]);
+      res.status(500).json({ error: err.message });
+    })
+    .save(output);
+});
+
 // Endpoint: Adicionar Reverb
 app.post('/audio/reverb', upload.single('file'), (req, res) => {
   const output = `/tmp/reverb-${Date.now()}.wav`;
@@ -1226,7 +1265,8 @@ app.get('/', (req, res) => {
           'POST /audio/normalize-ogg - Normaliza + OGG 44100Hz (loudness, truePeak, lra, volumeBoost, bitrate)',
           'POST /audio/reverb-normalize-mp3 - Reverb+Normaliza+Volume+MP3 (decay, delay, volumeBoost, bitrate)',
           'POST /audio/reverb-normalize-ogg - Reverb+Normaliza+Volume+OGG (decay, delay, volumeBoost, bitrate)',
-          'POST /audio/mix - Mix 2 áudios (audio1, audio2)',
+          'POST /audio/mix - Mix 2 áudios sobrepostos (audio1, audio2)',
+          'POST /audio/concat - Concatenar áudios em sequência (audios[], format: mp3|wav|ogg)',
           'POST /audio/reverb - Adiciona reverb (file, decay, delay)',
           'POST /audio/compress - Compressor dinâmico (file, threshold, ratio, attack, release)',
           'POST /audio/normalize - Normalização de loudness (file)',
