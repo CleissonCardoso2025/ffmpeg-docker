@@ -806,6 +806,268 @@ app.post('/video/remove-audio', upload.single('file'), (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────
+// ✨ TRANSIÇÕES DE VÍDEO (FFmpeg xfade)
+// ─────────────────────────────────────────────────────
+
+// Lista de todas as transições xfade disponíveis
+const XFADE_TRANSITIONS = [
+  // Fade
+  'fade', 'fadeblack', 'fadewhite', 'fadegrays', 'dissolve',
+  // Wipe
+  'wipeleft', 'wiperight', 'wipeup', 'wipedown',
+  'wipetl', 'wipetr', 'wipebl', 'wipebr',
+  // Slide
+  'slideleft', 'slideright', 'slideup', 'slidedown',
+  // Smooth
+  'smoothleft', 'smoothright', 'smoothup', 'smoothdown',
+  // Cover
+  'coverleft', 'coverright', 'coverup', 'coverdown',
+  // Reveal
+  'revealleft', 'revealright', 'revealup', 'revealdown',
+  // Circle/Shape
+  'circlecrop', 'circleclose', 'circleopen', 'rectcrop',
+  // Diagonal
+  'diagbl', 'diagbr', 'diagtl', 'diagtr',
+  // Slice
+  'hlslice', 'hrslice', 'vuslice', 'vdslice',
+  // Wind
+  'hlwind', 'hrwind', 'vuwind', 'vdwind',
+  // Open/Close
+  'horzclose', 'horzopen', 'vertclose', 'vertopen',
+  // Squeeze
+  'squeezev', 'squeezeh',
+  // Especiais
+  'pixelize', 'radial', 'hblur', 'distance', 'zoomin'
+];
+
+// Função auxiliar: obter duração de um vídeo via ffprobe
+function getVideoDuration(filePath) {
+  try {
+    const result = execSync(
+      `ffprobe -v quiet -print_format json -show_format "${filePath}"`,
+      { encoding: 'utf8' }
+    );
+    const data = JSON.parse(result);
+    return parseFloat(data.format.duration);
+  } catch (e) {
+    return 0;
+  }
+}
+
+/**
+ * ✨ Listar transições disponíveis
+ */
+app.get('/video/transitions', (req, res) => {
+  res.json({
+    total: XFADE_TRANSITIONS.length,
+    transitions: XFADE_TRANSITIONS,
+    categories: {
+      fade: ['fade', 'fadeblack', 'fadewhite', 'fadegrays', 'dissolve'],
+      wipe: ['wipeleft', 'wiperight', 'wipeup', 'wipedown', 'wipetl', 'wipetr', 'wipebl', 'wipebr'],
+      slide: ['slideleft', 'slideright', 'slideup', 'slidedown'],
+      smooth: ['smoothleft', 'smoothright', 'smoothup', 'smoothdown'],
+      cover: ['coverleft', 'coverright', 'coverup', 'coverdown'],
+      reveal: ['revealleft', 'revealright', 'revealup', 'revealdown'],
+      circle: ['circlecrop', 'circleclose', 'circleopen', 'rectcrop'],
+      diagonal: ['diagbl', 'diagbr', 'diagtl', 'diagtr'],
+      slice: ['hlslice', 'hrslice', 'vuslice', 'vdslice'],
+      wind: ['hlwind', 'hrwind', 'vuwind', 'vdwind'],
+      openClose: ['horzclose', 'horzopen', 'vertclose', 'vertopen'],
+      squeeze: ['squeezev', 'squeezeh'],
+      special: ['pixelize', 'radial', 'hblur', 'distance', 'zoomin']
+    }
+  });
+});
+
+/**
+ * ✨ Transição entre 2 vídeos
+ * 
+ * Aplica uma transição xfade entre exatamente 2 vídeos.
+ * 
+ * Body (form-data):
+ * - video1: arquivo de vídeo 1
+ * - video2: arquivo de vídeo 2
+ * - transition: nome da transição (padrão: 'fade'). Use GET /video/transitions para ver todas
+ * - transitionDuration: duração da transição em segundos (padrão: 1)
+ * - crf: qualidade (padrão: 20)
+ */
+app.post('/video/transition', upload.fields([{name:'video1'},{name:'video2'}]), (req, res) => {
+  const output = `/tmp/transition-${Date.now()}.mp4`;
+  const transition = req.body.transition || 'fade';
+  const transitionDuration = parseFloat(req.body.transitionDuration) || 1;
+  const crf = parseInt(req.body.crf) || 20;
+  const video1Path = req.files.video1[0].path;
+  const video2Path = req.files.video2[0].path;
+
+  if (!XFADE_TRANSITIONS.includes(transition)) {
+    cleanupFiles([video1Path, video2Path]);
+    return res.status(400).json({
+      error: `Transição "${transition}" não encontrada.`,
+      available: XFADE_TRANSITIONS
+    });
+  }
+
+  // Obter duração do primeiro vídeo para calcular o offset
+  const duration1 = getVideoDuration(video1Path);
+  if (duration1 <= transitionDuration) {
+    cleanupFiles([video1Path, video2Path]);
+    return res.status(400).json({
+      error: `O vídeo 1 (${duration1.toFixed(2)}s) precisa ser mais longo que a duração da transição (${transitionDuration}s).`
+    });
+  }
+
+  const offset = duration1 - transitionDuration;
+
+  ffmpeg()
+    .input(video1Path)
+    .input(video2Path)
+    .complexFilter([
+      `[0:v][1:v]xfade=transition=${transition}:duration=${transitionDuration}:offset=${offset.toFixed(3)}[vout]`,
+      `[0:a][1:a]acrossfade=d=${transitionDuration}[aout]`
+    ])
+    .outputOptions([
+      '-map [vout]',
+      '-map [aout]',
+      '-c:v libx264',
+      `-crf ${crf}`,
+      '-preset medium',
+      '-pix_fmt yuv420p',
+      '-movflags +faststart'
+    ])
+    .on('end', () => {
+      res.download(output, () => cleanupFiles([video1Path, video2Path, output]));
+    })
+    .on('error', (err) => {
+      // Tentar sem áudio se der erro de áudio
+      ffmpeg()
+        .input(video1Path)
+        .input(video2Path)
+        .complexFilter([
+          `[0:v][1:v]xfade=transition=${transition}:duration=${transitionDuration}:offset=${offset.toFixed(3)}[vout]`
+        ])
+        .outputOptions([
+          '-map [vout]',
+          '-c:v libx264',
+          `-crf ${crf}`,
+          '-preset medium',
+          '-pix_fmt yuv420p',
+          '-movflags +faststart',
+          '-an'
+        ])
+        .on('end', () => {
+          res.download(output, () => cleanupFiles([video1Path, video2Path, output]));
+        })
+        .on('error', (err2) => {
+          cleanupFiles([video1Path, video2Path]);
+          res.status(500).json({ error: err2.message });
+        })
+        .save(output);
+    })
+    .save(output);
+});
+
+/**
+ * ✨ Concatenar múltiplos vídeos COM transições
+ * 
+ * Junta de 2 a 10 vídeos com transições xfade entre cada um.
+ * 
+ * Body (form-data):
+ * - videos: array de arquivos de vídeo (2-10)
+ * - transition: transição para usar entre todos (padrão: 'fade')
+ * - transitions: JSON array de transições individuais (ex: '["fade","wipeleft","dissolve"]')
+ * - transitionDuration: duração de cada transição em segundos (padrão: 1)
+ * - crf: qualidade (padrão: 20)
+ */
+app.post('/video/concat-transition', upload.array('videos', 10), async (req, res) => {
+  const output = `/tmp/concat-trans-${Date.now()}.mp4`;
+  const defaultTransition = req.body.transition || 'fade';
+  const transitionDuration = parseFloat(req.body.transitionDuration) || 1;
+  const crf = parseInt(req.body.crf) || 20;
+
+  if (!req.files || req.files.length < 2) {
+    return res.status(400).json({ error: 'Envie pelo menos 2 vídeos (campo: videos).' });
+  }
+
+  // Parse array de transições individuais ou usar a mesma para todas
+  let transitions;
+  if (req.body.transitions) {
+    try {
+      transitions = JSON.parse(req.body.transitions);
+    } catch (e) {
+      transitions = null;
+    }
+  }
+
+  const filePaths = req.files.map(f => f.path);
+  const numTransitions = filePaths.length - 1;
+
+  // Obter durações de todos os vídeos
+  const durations = filePaths.map(f => getVideoDuration(f));
+
+  // Verificar se todos os vídeos são mais longos que a transição
+  for (let i = 0; i < durations.length; i++) {
+    if (durations[i] <= transitionDuration) {
+      cleanupFiles(filePaths);
+      return res.status(400).json({
+        error: `O vídeo ${i + 1} (${durations[i].toFixed(2)}s) precisa ser mais longo que a transição (${transitionDuration}s).`
+      });
+    }
+  }
+
+  // Construir filtro complexo encadeado com xfade
+  // Para N vídeos, precisamos N-1 xfade encadeados
+  const filterParts = [];
+  let cumulativeOffset = 0;
+
+  for (let i = 0; i < numTransitions; i++) {
+    const trans = (transitions && transitions[i]) ? transitions[i] : defaultTransition;
+
+    if (!XFADE_TRANSITIONS.includes(trans)) {
+      cleanupFiles(filePaths);
+      return res.status(400).json({
+        error: `Transição "${trans}" não encontrada.`,
+        available: XFADE_TRANSITIONS
+      });
+    }
+
+    // Calcular offset acumulado (considerando que cada transição "come" tempo)
+    cumulativeOffset += durations[i] - transitionDuration;
+
+    const inputA = i === 0 ? `[0:v]` : `[vtemp${i}]`;
+    const outputLabel = i === numTransitions - 1 ? `[vout]` : `[vtemp${i + 1}]`;
+
+    filterParts.push(
+      `${inputA}[${i + 1}:v]xfade=transition=${trans}:duration=${transitionDuration}:offset=${cumulativeOffset.toFixed(3)}${outputLabel}`
+    );
+  }
+
+  const cmd = ffmpeg();
+
+  // Adicionar todos os inputs
+  filePaths.forEach(f => cmd.input(f));
+
+  cmd
+    .complexFilter(filterParts)
+    .outputOptions([
+      '-map [vout]',
+      '-c:v libx264',
+      `-crf ${crf}`,
+      '-preset medium',
+      '-pix_fmt yuv420p',
+      '-movflags +faststart',
+      '-an' // Sem áudio para evitar complexidade do filter graph
+    ])
+    .on('end', () => {
+      res.download(output, () => cleanupFiles([...filePaths, output]));
+    })
+    .on('error', (err) => {
+      cleanupFiles(filePaths);
+      res.status(500).json({ error: err.message });
+    })
+    .save(output);
+});
+
+// ─────────────────────────────────────────────────────
 // 🔥 HTML ANIMADO → MP4 (PROFISSIONAL)
 // ─────────────────────────────────────────────────────
 
@@ -1308,6 +1570,11 @@ app.get('/', (req, res) => {
         info: [
           'POST /video/probe - Informações detalhadas do vídeo (file)',
           'POST /video/thumbnail - Gerar thumbnail do vídeo (file, timestamp, width)',
+        ],
+        transitions: [
+          '✨ GET /video/transitions - Listar todas as 55+ transições disponíveis com categorias',
+          '✨ POST /video/transition - Transição entre 2 vídeos (video1, video2, transition, transitionDuration)',
+          '✨ POST /video/concat-transition - Concatenar múltiplos vídeos COM transições (videos[], transition, transitions[], transitionDuration)',
         ]
       }
     }
