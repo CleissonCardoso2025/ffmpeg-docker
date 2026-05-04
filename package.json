@@ -1,7 +1,7 @@
 {
   "name": "ffmpeg-media-api",
-  "version": "3.0.0",
-  "description": "API FFmpeg avançada para processamento de áudio e vídeo com HTML→MP4",
+  "version": "3.1.0",
+  "description": "API FFmpeg avançada para processamento de áudio e vídeo com HTML→MP4 + WhatsApp PTT",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

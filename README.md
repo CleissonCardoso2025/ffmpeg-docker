@@ -1,8 +1,15 @@
-# 🎬 FFmpeg Media API v3.0.0
+# 🎬 FFmpeg Media API v3.1.0
 
-API REST profissional para processamento de **áudio**, **vídeo**, **transições** e **HTML animado → MP4** usando FFmpeg + Puppeteer.
+API REST profissional para processamento de **áudio**, **vídeo**, **transições**, **HTML animado → MP4** e **conversão para WhatsApp PTT (mensagem de voz)** usando FFmpeg + Puppeteer.
 
 Desenvolvida com Node.js, Express, fluent-ffmpeg e puppeteer-core.
+
+---
+
+## 🆕 Novidades v3.1.0
+
+- 🎙️ **`/convert/audio/to/whatsapp`** — Converte qualquer áudio em **OGG/Opus** otimizado pra mensagem de voz do WhatsApp (PTT)
+- 🎙️ **`/audio/normalize-whatsapp`** — Versão pro com normalização de loudness + Opus, ideal pra áudios de TTS
 
 ---
 
@@ -24,26 +31,28 @@ A API ficará disponível em `http://localhost:9000`
 
 ### 🎵 ÁUDIO — Conversão
 
-| Endpoint                | Método | Descrição                                                                | Parâmetros         |
-| ----------------------- | ------ | ------------------------------------------------------------------------ | ------------------ |
-| `/convert/audio/to/mp3` | POST   | Converte qualquer arquivo de áudio para formato **MP3**                  | `file` (form-data) |
-| `/convert/audio/to/wav` | POST   | Converte qualquer arquivo de áudio para formato **WAV** (sem compressão) | `file` (form-data) |
-| `/convert/audio/to/ogg` | POST   | Converte qualquer arquivo de áudio para formato **OGG Vorbis**           | `file` (form-data) |
+| Endpoint                       | Método | Descrição                                                                                          | Parâmetros                                                       |
+| ------------------------------ | ------ | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `/convert/audio/to/mp3`        | POST   | Converte qualquer arquivo de áudio para formato **MP3**                                            | `file` (form-data)                                               |
+| `/convert/audio/to/wav`        | POST   | Converte qualquer arquivo de áudio para formato **WAV** (sem compressão)                           | `file` (form-data)                                               |
+| `/convert/audio/to/ogg`        | POST   | Converte qualquer arquivo de áudio para formato **OGG Vorbis**                                     | `file` (form-data)                                               |
+| 🆕 `/convert/audio/to/whatsapp` | POST   | 🎙️ Converte qualquer áudio em **OGG/Opus 48kHz mono** — formato exigido pelo **WhatsApp PTT** (voice note) | `file`, `bitrate` (padrão `64k`), `sampleRate` (48000), `channels` (1) |
 
 ### 🎵 ÁUDIO — Processamento
 
-| Endpoint                      | Método | Descrição                                                                                                          | Parâmetros                                                                        |
-| ----------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| `/audio/normalize`            | POST   | **Normaliza o volume** do áudio para padrão broadcast (EBU R128). Ideal para deixar todos os áudios no mesmo nível | `file`                                                                            |
-| `/audio/normalize-mp3`        | POST   | Normaliza volume com controle total + converte para **MP3 44100Hz**                                                | `file`, `loudness`, `truePeak`, `lra`, `volumeBoost`, `bitrate`                   |
-| `/audio/normalize-ogg`        | POST   | Normaliza volume + converte para **OGG 44100Hz**                                                                   | `file`, `loudness`, `truePeak`, `lra`, `volumeBoost`, `bitrate`                   |
-| `/audio/reverb`               | POST   | Adiciona efeito de **reverberação** (eco). Simula som em ambientes como igrejas                                    | `file`, `decay`, `delay`                                                          |
-| `/audio/compress`             | POST   | **Compressor dinâmico** — reduz diferença entre partes altas e baixas. Essencial para podcasts                     | `file`, `threshold`, `ratio`, `attack`, `release`                                 |
-| `/audio/fade`                 | POST   | Adiciona **Fade In** no início e **Fade Out** no final                                                             | `file`, `duration` (segundos)                                                     |
-| `/audio/eq`                   | POST   | **Equalização** — ajusta graves (bass) e agudos (treble)                                                           | `file`, `bass` (dB), `treble` (dB)                                                |
-| `/audio/gate`                 | POST   | **Noise Gate** — remove ruído de fundo (ar-condicionado, chiado)                                                   | `file`, `threshold`                                                               |
-| `/audio/reverb-normalize-mp3` | POST   | **Tudo em um**: Reverb + Normalização + Volume + MP3                                                               | `file`, `decay`, `delay`, `loudness`, `truePeak`, `lra`, `volumeBoost`, `bitrate` |
-| `/audio/reverb-normalize-ogg` | POST   | **Tudo em um**: Reverb + Normalização + Volume + OGG                                                               | `file`, `decay`, `delay`, `loudness`, `truePeak`, `lra`, `volumeBoost`, `bitrate` |
+| Endpoint                         | Método | Descrição                                                                                                          | Parâmetros                                                                        |
+| -------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `/audio/normalize`               | POST   | **Normaliza o volume** do áudio para padrão broadcast (EBU R128). Ideal para deixar todos os áudios no mesmo nível | `file`                                                                            |
+| `/audio/normalize-mp3`           | POST   | Normaliza volume com controle total + converte para **MP3 44100Hz**                                                | `file`, `loudness`, `truePeak`, `lra`, `volumeBoost`, `bitrate`                   |
+| `/audio/normalize-ogg`           | POST   | Normaliza volume + converte para **OGG 44100Hz**                                                                   | `file`, `loudness`, `truePeak`, `lra`, `volumeBoost`, `bitrate`                   |
+| 🆕 `/audio/normalize-whatsapp`    | POST   | 🎙️ Normaliza loudness + converte para **OGG/Opus pro WhatsApp PTT**. Ideal pra áudios de TTS com volume baixo       | `file`, `loudness`, `truePeak`, `lra`, `volumeBoost`, `bitrate` (padrão `64k`)    |
+| `/audio/reverb`                  | POST   | Adiciona efeito de **reverberação** (eco). Simula som em ambientes como igrejas                                    | `file`, `decay`, `delay`                                                          |
+| `/audio/compress`                | POST   | **Compressor dinâmico** — reduz diferença entre partes altas e baixas. Essencial para podcasts                     | `file`, `threshold`, `ratio`, `attack`, `release`                                 |
+| `/audio/fade`                    | POST   | Adiciona **Fade In** no início e **Fade Out** no final                                                             | `file`, `duration` (segundos)                                                     |
+| `/audio/eq`                      | POST   | **Equalização** — ajusta graves (bass) e agudos (treble)                                                           | `file`, `bass` (dB), `treble` (dB)                                                |
+| `/audio/gate`                    | POST   | **Noise Gate** — remove ruído de fundo (ar-condicionado, chiado)                                                   | `file`, `threshold`                                                               |
+| `/audio/reverb-normalize-mp3`    | POST   | **Tudo em um**: Reverb + Normalização + Volume + MP3                                                               | `file`, `decay`, `delay`, `loudness`, `truePeak`, `lra`, `volumeBoost`, `bitrate` |
+| `/audio/reverb-normalize-ogg`    | POST   | **Tudo em um**: Reverb + Normalização + Volume + OGG                                                               | `file`, `decay`, `delay`, `loudness`, `truePeak`, `lra`, `volumeBoost`, `bitrate` |
 
 ### 🎵 ÁUDIO — Combinar Múltiplos
 
@@ -66,7 +75,7 @@ A API ficará disponível em `http://localhost:9000`
 | Endpoint                 | Método | Descrição                                                            | Parâmetros              |
 | ------------------------ | ------ | -------------------------------------------------------------------- | ----------------------- |
 | `/convert/video/to/mp4`  | POST   | Converte qualquer vídeo para **MP4 H.264** — formato mais compatível | `file`, `crf`, `preset` |
-| `/convert/video/to/webm` | POST   | Converte para **WebM VP9** — format otimizado para web               | `file`, `crf`           |
+| `/convert/video/to/webm` | POST   | Converte para **WebM VP9** — formato otimizado para web              | `file`, `crf`           |
 | `/convert/video/to/gif`  | POST   | Converte vídeo para **GIF animado** com paleta otimizada             | `file`, `fps`, `width`  |
 
 ### 🎬 VÍDEO — Processamento
@@ -138,6 +147,60 @@ A API ficará disponível em `http://localhost:9000`
 ---
 
 ## 💡 Exemplos de Uso
+
+### 🎙️ WhatsApp PTT — Mensagem de Voz (NOVO)
+
+```bash
+# Conversão simples para WhatsApp (qualquer áudio → OGG/Opus PTT)
+curl -X POST http://localhost:9000/convert/audio/to/whatsapp \
+  -F "file=@audio.wav" \
+  --output voice.ogg
+
+# Validar se ficou em Opus
+ffprobe voice.ogg
+# Esperado: Audio: opus, 48000 Hz, mono
+
+# Bitrate customizado (mais qualidade ou mais leve)
+curl -X POST http://localhost:9000/convert/audio/to/whatsapp \
+  -F "file=@audio.wav" \
+  -F "bitrate=96k" \
+  --output voice.ogg
+
+# Versão com normalização (ideal pra TTS com volume baixo)
+curl -X POST http://localhost:9000/audio/normalize-whatsapp \
+  -F "file=@tts-gemini.wav" \
+  -F "loudness=-14" \
+  -F "volumeBoost=1.5" \
+  --output voice.ogg
+```
+
+#### 🚀 Fluxo completo no n8n + Evolution API
+
+```
+[Gemini TTS / ElevenLabs] 
+    ↓ binary: data (.wav)
+[HTTP Request: /convert/audio/to/whatsapp] 
+    ↓ binary: data (.ogg/opus)
+[Upload Litterbox / S3] 
+    ↓ url
+[Evolution API: sendWhatsAppAudio { ptt: true }] ✅
+```
+
+**Configuração no node HTTP Request do n8n:**
+
+```
+Method:           POST
+URL:              http://ffmpeg-api:3000/convert/audio/to/whatsapp
+Body Content Type: Form-Data
+Body Parameters:
+  └─ file (n8n Binary File)
+      Input Data Field Name: data
+Response:
+  Response Format:    File
+  Put Output in Field: data
+```
+
+---
 
 ### ✨ Transição entre 2 vídeos
 
@@ -242,6 +305,24 @@ curl -X POST http://localhost:9000/video/url-to-mp4 \
 
 ---
 
+## ⚙️ Parâmetros do WhatsApp PTT
+
+| Parâmetro    | Tipo    | Padrão  | Descrição                                                            |
+| ------------ | ------- | ------- | -------------------------------------------------------------------- |
+| `file`       | file    | —       | Arquivo de áudio de entrada **(obrigatório)** — qualquer formato     |
+| `bitrate`    | string  | `64k`   | Taxa de bits do Opus (`32k`, `48k`, `64k`, `96k`, `128k`)            |
+| `sampleRate` | number  | `48000` | Taxa de amostragem em Hz (recomendado manter em 48000)               |
+| `channels`   | number  | `1`     | Canais (1 = mono, recomendado pra voz; 2 = stereo)                   |
+
+**🎯 Specs técnicas do output:**
+- Codec: `libopus`
+- Container: `ogg`
+- Application: `voip` (otimizado pra fala)
+- VBR: ativado
+- Compression level: 10 (qualidade máxima)
+
+---
+
 ## ⚙️ Parâmetros do HTML → MP4
 
 | Parâmetro           | Tipo    | Padrão | Descrição                                   |
@@ -261,16 +342,31 @@ curl -X POST http://localhost:9000/video/url-to-mp4 \
 
 ## 📊 Resumo Total de Endpoints
 
-| Categoria             | Quantidade       |
-| --------------------- | ---------------- |
-| Áudio — Conversão     | 3                |
-| Áudio — Processamento | 10               |
-| Áudio — Combinar      | 3                |
-| Áudio — Info          | 1                |
-| Vídeo — Conversão     | 3                |
-| Vídeo — Processamento | 8                |
-| Vídeo — Áudio↔Vídeo   | 2                |
-| Vídeo — Info          | 2                |
-| ✨ Transições         | 3 (55+ efeitos)  |
-| 🔥 Geração de Vídeo   | 4                |
-| **Total**             | **39 endpoints** |
+| Categoria                | Quantidade       |
+| ------------------------ | ---------------- |
+| Áudio — Conversão        | 4 (🆕 +1 WhatsApp) |
+| Áudio — Processamento    | 11 (🆕 +1 WhatsApp) |
+| Áudio — Combinar         | 3                |
+| Áudio — Info             | 1                |
+| Vídeo — Conversão        | 3                |
+| Vídeo — Processamento    | 8                |
+| Vídeo — Áudio↔Vídeo      | 2                |
+| Vídeo — Info             | 2                |
+| ✨ Transições            | 3 (55+ efeitos)  |
+| 🔥 Geração de Vídeo      | 4                |
+| **Total**                | **41 endpoints** |
+
+---
+
+## 🐳 Stack Técnica
+
+- **Node.js 18 (Alpine)**
+- **FFmpeg** (com libopus, libvorbis, libmp3lame, libx264, libvpx)
+- **Chromium** + Puppeteer-core (pra HTML → MP4)
+- **Express** + Multer + fluent-ffmpeg
+
+---
+
+## 📝 Licença
+
+MIT

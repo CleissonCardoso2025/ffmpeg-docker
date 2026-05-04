@@ -76,7 +76,7 @@ app.post('/convert/audio/to/wav', upload.single('file'), (req, res) => {
     .save(output);
 });
 
-// Endpoint: Converter para OGG
+// Endpoint: Converter para OGG (Vorbis)
 app.post('/convert/audio/to/ogg', upload.single('file'), (req, res) => {
   const output = `/tmp/output-${Date.now()}.ogg`;
   ffmpeg(req.file.path)
@@ -84,6 +84,34 @@ app.post('/convert/audio/to/ogg', upload.single('file'), (req, res) => {
     .audioCodec('libvorbis')
     .on('end', () => {
       res.download(output, () => cleanupFiles([req.file.path, output]));
+    })
+    .on('error', (err) => {
+      cleanupFiles([req.file.path]);
+      res.status(500).json({ error: err.message });
+    })
+    .save(output);
+});
+
+// 🆕 Endpoint: Converter áudio para OGG/Opus (WhatsApp PTT - Mensagem de Voz)
+// Codec: libopus | Bitrate: 64k | Mono | 48kHz | Application: voip
+// Formato exigido pelo WhatsApp para áudios de voz (ptt:true)
+app.post('/convert/audio/to/whatsapp', upload.single('file'), (req, res) => {
+  const output = `/tmp/whatsapp-${Date.now()}.ogg`;
+  
+  // Permite override via body (opcional)
+  const bitrate = req.body.bitrate || '64k';
+  const sampleRate = parseInt(req.body.sampleRate) || 48000;
+  const channels = parseInt(req.body.channels) || 1;
+  
+  ffmpeg(req.file.path)
+    .audioCodec('libopus')
+    .audioBitrate(bitrate)
+    .audioChannels(channels)
+    .audioFrequency(sampleRate)
+    .outputOptions(['-application voip', '-vbr on', '-compression_level 10'])
+    .toFormat('ogg')
+    .on('end', () => {
+      res.download(output, 'voice.ogg', () => cleanupFiles([req.file.path, output]));
     })
     .on('error', (err) => {
       cleanupFiles([req.file.path]);
@@ -168,6 +196,47 @@ app.post('/audio/normalize-ogg', upload.single('file'), (req, res) => {
     .save(output);
 });
 
+// 🆕 Endpoint: Normalizar + Converter para WhatsApp PTT (com loudness)
+// Versão pro do /convert/audio/to/whatsapp com normalização de volume
+app.post('/audio/normalize-whatsapp', upload.single('file'), (req, res) => {
+  const output = `/tmp/normalized-whatsapp-${Date.now()}.ogg`;
+  
+  const loudness = req.body.loudness || -16;
+  const truePeak = req.body.truePeak || -1.5;
+  const lra = req.body.lra || 11;
+  const volumeBoost = req.body.volumeBoost || 1.0;
+  const bitrate = req.body.bitrate || '64k';
+  
+  const filters = [];
+  
+  if (volumeBoost > 1.2) {
+    filters.push('acompressor=threshold=0.05:ratio=10:attack=100:release=500');
+  }
+  
+  filters.push(`loudnorm=I=${loudness}:TP=${truePeak}:LRA=${lra}`);
+  
+  if (volumeBoost != 1.0) {
+    filters.push(`volume=${volumeBoost}`);
+  }
+  
+  ffmpeg(req.file.path)
+    .audioFilters(filters)
+    .audioCodec('libopus')
+    .audioBitrate(bitrate)
+    .audioChannels(1)
+    .audioFrequency(48000)
+    .outputOptions(['-application voip', '-vbr on', '-compression_level 10'])
+    .toFormat('ogg')
+    .on('end', () => {
+      res.download(output, 'voice.ogg', () => cleanupFiles([req.file.path, output]));
+    })
+    .on('error', (err) => {
+      cleanupFiles([req.file.path]);
+      res.status(500).json({ error: err.message });
+    })
+    .save(output);
+});
+
 // Endpoint: Reverb + Normalizar + Volume + MP3 (TUDO EM UM)
 app.post('/audio/reverb-normalize-mp3', upload.single('file'), (req, res) => {
   const output = `/tmp/reverb-normalized-mp3-${Date.now()}.mp3`;
@@ -182,18 +251,14 @@ app.post('/audio/reverb-normalize-mp3', upload.single('file'), (req, res) => {
   
   const filters = [];
   
-  // Reverb
   filters.push(`aecho=0.8:0.9:${delay}:${decay}`);
   
-  // Compressor
   if (volumeBoost > 1.2) {
     filters.push('acompressor=threshold=0.05:ratio=10:attack=100:release=500');
   }
   
-  // Normalização
   filters.push(`loudnorm=I=${loudness}:TP=${truePeak}:LRA=${lra}`);
   
-  // Volume boost
   if (volumeBoost != 1.0) {
     filters.push(`volume=${volumeBoost}`);
   }
@@ -228,18 +293,14 @@ app.post('/audio/reverb-normalize-ogg', upload.single('file'), (req, res) => {
   
   const filters = [];
   
-  // Reverb
   filters.push(`aecho=0.8:0.9:${delay}:${decay}`);
   
-  // Compressor
   if (volumeBoost > 1.2) {
     filters.push('acompressor=threshold=0.05:ratio=10:attack=100:release=500');
   }
   
-  // Normalização
   filters.push(`loudnorm=I=${loudness}:TP=${truePeak}:LRA=${lra}`);
   
-  // Volume boost
   if (volumeBoost != 1.0) {
     filters.push(`volume=${volumeBoost}`);
   }
@@ -290,7 +351,6 @@ app.post('/audio/concat', upload.array('audios', 10), (req, res) => {
     return res.status(400).json({ error: 'Envie pelo menos 2 arquivos de áudio (campo: audios).' });
   }
 
-  // Criar arquivo de lista para concat
   const fileList = req.files.map(f => `file '${f.path}'`).join('\n');
   fs.writeFileSync(listFile, fileList);
 
@@ -456,10 +516,9 @@ app.post('/probe', upload.single('file'), (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────
-// 🎬 VÍDEO — Novos Endpoints
+// 🎬 VÍDEO — Endpoints
 // ─────────────────────────────────────────────────────
 
-// Endpoint: Converter vídeo para MP4
 app.post('/convert/video/to/mp4', upload.single('file'), (req, res) => {
   const output = `/tmp/video-mp4-${Date.now()}.mp4`;
   const crf = req.body.crf || 23;
@@ -480,7 +539,6 @@ app.post('/convert/video/to/mp4', upload.single('file'), (req, res) => {
     .save(output);
 });
 
-// Endpoint: Converter vídeo para WebM
 app.post('/convert/video/to/webm', upload.single('file'), (req, res) => {
   const output = `/tmp/video-webm-${Date.now()}.webm`;
   const crf = req.body.crf || 30;
@@ -500,7 +558,6 @@ app.post('/convert/video/to/webm', upload.single('file'), (req, res) => {
     .save(output);
 });
 
-// Endpoint: Converter vídeo para GIF
 app.post('/convert/video/to/gif', upload.single('file'), (req, res) => {
   const output = `/tmp/video-gif-${Date.now()}.gif`;
   const fps = req.body.fps || 15;
@@ -520,7 +577,6 @@ app.post('/convert/video/to/gif', upload.single('file'), (req, res) => {
     .save(output);
 });
 
-// Endpoint: Extrair áudio de vídeo
 app.post('/video/extract-audio', upload.single('file'), (req, res) => {
   const format = req.body.format || 'mp3';
   const output = `/tmp/extracted-audio-${Date.now()}.${format}`;
@@ -547,7 +603,6 @@ app.post('/video/extract-audio', upload.single('file'), (req, res) => {
     .save(output);
 });
 
-// Endpoint: Redimensionar vídeo
 app.post('/video/resize', upload.single('file'), (req, res) => {
   const width = req.body.width || 1280;
   const height = req.body.height || 720;
@@ -568,7 +623,6 @@ app.post('/video/resize', upload.single('file'), (req, res) => {
     .save(output);
 });
 
-// Endpoint: Cortar vídeo (trim)
 app.post('/video/trim', upload.single('file'), (req, res) => {
   const start = req.body.start || '00:00:00';
   const duration = req.body.duration || '00:00:10';
@@ -590,7 +644,6 @@ app.post('/video/trim', upload.single('file'), (req, res) => {
     .save(output);
 });
 
-// Endpoint: Gerar thumbnail do vídeo
 app.post('/video/thumbnail', upload.single('file'), (req, res) => {
   const timestamp = req.body.timestamp || '00:00:01';
   const width = req.body.width || 640;
@@ -610,10 +663,9 @@ app.post('/video/thumbnail', upload.single('file'), (req, res) => {
     .save(output);
 });
 
-// Endpoint: Adicionar marca d'água em vídeo
 app.post('/video/watermark', upload.fields([{name:'video'},{name:'watermark'}]), (req, res) => {
   const output = `/tmp/watermarked-${Date.now()}.mp4`;
-  const position = req.body.position || 'bottomright'; // topleft, topright, bottomleft, bottomright, center
+  const position = req.body.position || 'bottomright';
   const opacity = req.body.opacity || 0.7;
   const margin = req.body.margin || 10;
   const videoPath = req.files.video[0].path;
@@ -648,7 +700,6 @@ app.post('/video/watermark', upload.fields([{name:'video'},{name:'watermark'}]),
     .save(output);
 });
 
-// Endpoint: Comprimir vídeo
 app.post('/video/compress', upload.single('file'), (req, res) => {
   const output = `/tmp/compressed-video-${Date.now()}.mp4`;
   const crf = req.body.crf || 28;
@@ -675,9 +726,8 @@ app.post('/video/compress', upload.single('file'), (req, res) => {
     .save(output);
 });
 
-// Endpoint: Velocidade do vídeo
 app.post('/video/speed', upload.single('file'), (req, res) => {
-  const speed = parseFloat(req.body.speed) || 2.0; // 2.0 = 2x mais rápido, 0.5 = metade velocidade
+  const speed = parseFloat(req.body.speed) || 2.0;
   const output = `/tmp/speed-${Date.now()}.mp4`;
   const videoFilter = `setpts=${(1 / speed).toFixed(4)}*PTS`;
   const audioFilter = `atempo=${speed}`;
@@ -700,9 +750,8 @@ app.post('/video/speed', upload.single('file'), (req, res) => {
     .save(output);
 });
 
-// Endpoint: Rotacionar vídeo
 app.post('/video/rotate', upload.single('file'), (req, res) => {
-  const angle = parseInt(req.body.angle) || 90; // 90, 180, 270
+  const angle = parseInt(req.body.angle) || 90;
   const output = `/tmp/rotated-${Date.now()}.mp4`;
 
   const transposeMap = {
@@ -727,12 +776,10 @@ app.post('/video/rotate', upload.single('file'), (req, res) => {
     .save(output);
 });
 
-// Endpoint: Concatenar múltiplos vídeos
 app.post('/video/concat', upload.array('videos', 10), (req, res) => {
   const output = `/tmp/concat-${Date.now()}.mp4`;
   const listFile = `/tmp/concat-list-${Date.now()}.txt`;
 
-  // Criar arquivo de lista para concat
   const fileList = req.files.map(f => `file '${f.path}'`).join('\n');
   fs.writeFileSync(listFile, fileList);
 
@@ -754,7 +801,6 @@ app.post('/video/concat', upload.array('videos', 10), (req, res) => {
     .save(output);
 });
 
-// Endpoint: Adicionar áudio a vídeo
 app.post('/video/add-audio', upload.fields([{name:'video'},{name:'audio'}]), (req, res) => {
   const output = `/tmp/video-with-audio-${Date.now()}.mp4`;
   const replaceAudio = req.body.replace === 'true';
@@ -787,7 +833,6 @@ app.post('/video/add-audio', upload.fields([{name:'video'},{name:'audio'}]), (re
     .save(output);
 });
 
-// Endpoint: Remover áudio do vídeo
 app.post('/video/remove-audio', upload.single('file'), (req, res) => {
   const output = `/tmp/noaudio-${Date.now()}.mp4`;
 
@@ -809,38 +854,23 @@ app.post('/video/remove-audio', upload.single('file'), (req, res) => {
 // ✨ TRANSIÇÕES DE VÍDEO (FFmpeg xfade)
 // ─────────────────────────────────────────────────────
 
-// Lista de todas as transições xfade disponíveis
 const XFADE_TRANSITIONS = [
-  // Fade
   'fade', 'fadeblack', 'fadewhite', 'fadegrays', 'dissolve',
-  // Wipe
   'wipeleft', 'wiperight', 'wipeup', 'wipedown',
   'wipetl', 'wipetr', 'wipebl', 'wipebr',
-  // Slide
   'slideleft', 'slideright', 'slideup', 'slidedown',
-  // Smooth
   'smoothleft', 'smoothright', 'smoothup', 'smoothdown',
-  // Cover
   'coverleft', 'coverright', 'coverup', 'coverdown',
-  // Reveal
   'revealleft', 'revealright', 'revealup', 'revealdown',
-  // Circle/Shape
   'circlecrop', 'circleclose', 'circleopen', 'rectcrop',
-  // Diagonal
   'diagbl', 'diagbr', 'diagtl', 'diagtr',
-  // Slice
   'hlslice', 'hrslice', 'vuslice', 'vdslice',
-  // Wind
   'hlwind', 'hrwind', 'vuwind', 'vdwind',
-  // Open/Close
   'horzclose', 'horzopen', 'vertclose', 'vertopen',
-  // Squeeze
   'squeezev', 'squeezeh',
-  // Especiais
   'pixelize', 'radial', 'hblur', 'distance', 'zoomin'
 ];
 
-// Função auxiliar: obter duração de um vídeo via ffprobe
 function getVideoDuration(filePath) {
   try {
     const result = execSync(
@@ -854,9 +884,6 @@ function getVideoDuration(filePath) {
   }
 }
 
-/**
- * ✨ Listar transições disponíveis
- */
 app.get('/video/transitions', (req, res) => {
   res.json({
     total: XFADE_TRANSITIONS.length,
@@ -879,18 +906,6 @@ app.get('/video/transitions', (req, res) => {
   });
 });
 
-/**
- * ✨ Transição entre 2 vídeos
- * 
- * Aplica uma transição xfade entre exatamente 2 vídeos.
- * 
- * Body (form-data):
- * - video1: arquivo de vídeo 1
- * - video2: arquivo de vídeo 2
- * - transition: nome da transição (padrão: 'fade'). Use GET /video/transitions para ver todas
- * - transitionDuration: duração da transição em segundos (padrão: 1)
- * - crf: qualidade (padrão: 20)
- */
 app.post('/video/transition', upload.fields([{name:'video1'},{name:'video2'}]), (req, res) => {
   const output = `/tmp/transition-${Date.now()}.mp4`;
   const transition = req.body.transition || 'fade';
@@ -907,7 +922,6 @@ app.post('/video/transition', upload.fields([{name:'video1'},{name:'video2'}]), 
     });
   }
 
-  // Obter duração do primeiro vídeo para calcular o offset
   const duration1 = getVideoDuration(video1Path);
   if (duration1 <= transitionDuration) {
     cleanupFiles([video1Path, video2Path]);
@@ -938,7 +952,6 @@ app.post('/video/transition', upload.fields([{name:'video1'},{name:'video2'}]), 
       res.download(output, () => cleanupFiles([video1Path, video2Path, output]));
     })
     .on('error', (err) => {
-      // Tentar sem áudio se der erro de áudio
       ffmpeg()
         .input(video1Path)
         .input(video2Path)
@@ -966,18 +979,6 @@ app.post('/video/transition', upload.fields([{name:'video1'},{name:'video2'}]), 
     .save(output);
 });
 
-/**
- * ✨ Concatenar múltiplos vídeos COM transições
- * 
- * Junta de 2 a 10 vídeos com transições xfade entre cada um.
- * 
- * Body (form-data):
- * - videos: array de arquivos de vídeo (2-10)
- * - transition: transição para usar entre todos (padrão: 'fade')
- * - transitions: JSON array de transições individuais (ex: '["fade","wipeleft","dissolve"]')
- * - transitionDuration: duração de cada transição em segundos (padrão: 1)
- * - crf: qualidade (padrão: 20)
- */
 app.post('/video/concat-transition', upload.array('videos', 10), async (req, res) => {
   const output = `/tmp/concat-trans-${Date.now()}.mp4`;
   const defaultTransition = req.body.transition || 'fade';
@@ -988,7 +989,6 @@ app.post('/video/concat-transition', upload.array('videos', 10), async (req, res
     return res.status(400).json({ error: 'Envie pelo menos 2 vídeos (campo: videos).' });
   }
 
-  // Parse array de transições individuais ou usar a mesma para todas
   let transitions;
   if (req.body.transitions) {
     try {
@@ -1000,11 +1000,8 @@ app.post('/video/concat-transition', upload.array('videos', 10), async (req, res
 
   const filePaths = req.files.map(f => f.path);
   const numTransitions = filePaths.length - 1;
-
-  // Obter durações de todos os vídeos
   const durations = filePaths.map(f => getVideoDuration(f));
 
-  // Verificar se todos os vídeos são mais longos que a transição
   for (let i = 0; i < durations.length; i++) {
     if (durations[i] <= transitionDuration) {
       cleanupFiles(filePaths);
@@ -1014,8 +1011,6 @@ app.post('/video/concat-transition', upload.array('videos', 10), async (req, res
     }
   }
 
-  // Construir filtro complexo encadeado com xfade
-  // Para N vídeos, precisamos N-1 xfade encadeados
   const filterParts = [];
   let cumulativeOffset = 0;
 
@@ -1030,7 +1025,6 @@ app.post('/video/concat-transition', upload.array('videos', 10), async (req, res
       });
     }
 
-    // Calcular offset acumulado (considerando que cada transição "come" tempo)
     cumulativeOffset += durations[i] - transitionDuration;
 
     const inputA = i === 0 ? `[0:v]` : `[vtemp${i}]`;
@@ -1042,8 +1036,6 @@ app.post('/video/concat-transition', upload.array('videos', 10), async (req, res
   }
 
   const cmd = ffmpeg();
-
-  // Adicionar todos os inputs
   filePaths.forEach(f => cmd.input(f));
 
   cmd
@@ -1055,7 +1047,7 @@ app.post('/video/concat-transition', upload.array('videos', 10), async (req, res
       '-preset medium',
       '-pix_fmt yuv420p',
       '-movflags +faststart',
-      '-an' // Sem áudio para evitar complexidade do filter graph
+      '-an'
     ])
     .on('end', () => {
       res.download(output, () => cleanupFiles([...filePaths, output]));
@@ -1071,25 +1063,6 @@ app.post('/video/concat-transition', upload.array('videos', 10), async (req, res
 // 🔥 HTML ANIMADO → MP4 (PROFISSIONAL)
 // ─────────────────────────────────────────────────────
 
-/**
- * 🔥 Endpoint principal: HTML animado → MP4
- * 
- * Renderiza HTML/CSS/JS animado em vídeo MP4 de alta qualidade
- * usando Puppeteer (headless Chromium) para captura de frames
- * e FFmpeg para encoding do vídeo.
- * 
- * Body (JSON):
- * - html: string (HTML completo com <style> e <script> inline)
- * - width: number (padrão: 1920)
- * - height: number (padrão: 1080)
- * - duration: number (duração em segundos, padrão: 5)
- * - fps: number (frames por segundo, padrão: 30)
- * - crf: number (qualidade 0-51, menor=melhor, padrão: 18)
- * - preset: string (ultrafast,superfast,veryfast,faster,fast,medium,slow,slower,veryslow)
- * - format: string ('mp4' ou 'webm', padrão: 'mp4')
- * - transparent: boolean (fundo transparente com WebM/VP9, padrão: false)
- * - deviceScaleFactor: number (resolução do dispositivo, padrão: 1)
- */
 app.post('/video/html-to-mp4', async (req, res) => {
   if (!puppeteer) {
     return res.status(503).json({ error: 'Puppeteer não disponível. Instale chromium no container.' });
@@ -1121,7 +1094,6 @@ app.post('/video/html-to-mp4', async (req, res) => {
   let browser;
 
   try {
-    // Lançar browser headless
     browser = await puppeteer.launch({
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser',
       headless: 'new',
@@ -1143,10 +1115,7 @@ app.post('/video/html-to-mp4', async (req, res) => {
       deviceScaleFactor: parseFloat(deviceScaleFactor)
     });
 
-    // Carregar o HTML
     await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
-
-    // Aguardar animações CSS iniciais carregar
     await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 100)));
 
     const totalFrames = Math.ceil(duration * fps);
@@ -1154,7 +1123,6 @@ app.post('/video/html-to-mp4', async (req, res) => {
 
     console.log(`🎬 [${jobId}] Capturando ${totalFrames} frames (${width}x${height} @ ${fps}fps, ${duration}s)...`);
 
-    // Capturar frames
     for (let i = 0; i < totalFrames; i++) {
       const framePath = path.join(framesDir, `frame-${String(i).padStart(6, '0')}.png`);
 
@@ -1164,15 +1132,12 @@ app.post('/video/html-to-mp4', async (req, res) => {
         omitBackground: transparent
       });
 
-      // Avançar o tempo das animações CSS/JS
       await page.evaluate((ms) => {
-        // Disparar requestAnimationFrame callbacks
         if (window.__htmlToVideoTick) {
           window.__htmlToVideoTick(ms);
         }
       }, frameDuration);
 
-      // Esperar o tempo real do frame para animações CSS nativas
       await page.evaluate((ms) => new Promise(resolve => setTimeout(resolve, ms)), frameDuration);
     }
 
@@ -1181,7 +1146,6 @@ app.post('/video/html-to-mp4', async (req, res) => {
 
     console.log(`🎞️  [${jobId}] Frames capturados. Gerando vídeo com FFmpeg...`);
 
-    // Construir comando FFmpeg
     await new Promise((resolve, reject) => {
       const cmd = ffmpeg()
         .input(path.join(framesDir, 'frame-%06d.png'))
@@ -1214,10 +1178,7 @@ app.post('/video/html-to-mp4', async (req, res) => {
           .toFormat('mp4');
       }
 
-      cmd
-        .on('end', resolve)
-        .on('error', reject)
-        .save(output);
+      cmd.on('end', resolve).on('error', reject).save(output);
     });
 
     console.log(`✅ [${jobId}] Vídeo gerado com sucesso!`);
@@ -1236,17 +1197,6 @@ app.post('/video/html-to-mp4', async (req, res) => {
   }
 });
 
-/**
- * 🔥 HTML animado → MP4 via URL
- * 
- * Carrega uma URL, espera as animações, e grava como vídeo.
- * 
- * Body (JSON):
- * - url: string (URL da página)
- * - width, height, duration, fps, crf, preset, format (mesmos do html-to-mp4)
- * - waitForSelector: string (CSS selector para esperar antes de gravar)
- * - waitMs: number (milissegundos adicionais para esperar, padrão: 1000)
- */
 app.post('/video/url-to-mp4', async (req, res) => {
   if (!puppeteer) {
     return res.status(503).json({ error: 'Puppeteer não disponível.' });
@@ -1356,19 +1306,6 @@ app.post('/video/url-to-mp4', async (req, res) => {
   }
 });
 
-/**
- * 🔥 Imagens para vídeo slideshow
- * 
- * Cria um vídeo slideshow a partir de imagens com transições
- * 
- * Body (form-data):
- * - images: array de files
- * - durationPerImage: number (segundos por imagem, padrão: 3)
- * - transitionDuration: number (segundos de transição, padrão: 1)
- * - fps: number (padrão: 30)
- * - width: number (padrão: 1920)
- * - height: number (padrão: 1080)
- */
 app.post('/video/images-to-video', upload.array('images', 50), (req, res) => {
   const output = `/tmp/slideshow-${Date.now()}.mp4`;
   const durationPerImage = parseFloat(req.body.durationPerImage) || 3;
@@ -1382,14 +1319,12 @@ app.post('/video/images-to-video', upload.array('images', 50), (req, res) => {
 
   const cmd = ffmpeg();
 
-  // Adicionar cada imagem como input com loop e duração
   req.files.forEach(file => {
     cmd
       .input(file.path)
       .inputOptions(['-loop 1', `-t ${durationPerImage}`]);
   });
 
-  // Construir filtro complexo para concat
   const filterParts = [];
   const concatInputs = [];
 
@@ -1416,21 +1351,6 @@ app.post('/video/images-to-video', upload.array('images', 50), (req, res) => {
     .save(output);
 });
 
-/**
- * 🔥 Texto para vídeo
- * 
- * Gera um vídeo com texto animado sobre fundo colorido
- * 
- * Body (JSON):
- * - text: string (texto a renderizar)
- * - duration: number (padrão: 5)
- * - fontSize: number (padrão: 72)
- * - fontColor: string (padrão: 'white')
- * - bgColor: string (padrão: '0x1a1a2e')
- * - width: number (padrão: 1920)
- * - height: number (padrão: 1080)
- * - animation: string ('fade', 'scroll', 'typewriter', padrão: 'fade')
- */
 app.post('/video/text-to-video', (req, res) => {
   const {
     text = 'Hello World',
@@ -1476,7 +1396,6 @@ app.post('/video/text-to-video', (req, res) => {
     .save(output);
 });
 
-// Endpoint: Probe de vídeo (informações detalhadas)
 app.post('/video/probe', upload.single('file'), (req, res) => {
   ffmpeg.ffprobe(req.file.path, (err, metadata) => {
     cleanupFiles([req.file.path]);
@@ -1513,68 +1432,70 @@ app.post('/video/probe', upload.single('file'), (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     name: 'FFmpeg Media API',
-    version: '3.0.0',
+    version: '3.1.0',
     description: 'API profissional para processamento de áudio, vídeo e HTML→MP4',
     endpoints: {
       audio: {
         conversion: [
           'POST /convert/audio/to/mp3 - Converter áudio para MP3 (file)',
           'POST /convert/audio/to/wav - Converter áudio para WAV (file)',
-          'POST /convert/audio/to/ogg - Converter áudio para OGG (file)',
+          'POST /convert/audio/to/ogg - Converter áudio para OGG/Vorbis (file)',
+          '🆕 POST /convert/audio/to/whatsapp - OGG/Opus pra WhatsApp PTT (file, bitrate, sampleRate, channels)',
         ],
         processing: [
-          'POST /audio/normalize-mp3 - Normaliza + MP3 44100Hz (loudness, truePeak, lra, volumeBoost, bitrate)',
-          'POST /audio/normalize-ogg - Normaliza + OGG 44100Hz (loudness, truePeak, lra, volumeBoost, bitrate)',
-          'POST /audio/reverb-normalize-mp3 - Reverb+Normaliza+Volume+MP3 (decay, delay, volumeBoost, bitrate)',
-          'POST /audio/reverb-normalize-ogg - Reverb+Normaliza+Volume+OGG (decay, delay, volumeBoost, bitrate)',
-          'POST /audio/mix - Mix 2 áudios sobrepostos (audio1, audio2)',
-          'POST /audio/concat - Concatenar áudios em sequência (audios[], format: mp3|wav|ogg)',
-          'POST /audio/reverb - Adiciona reverb (file, decay, delay)',
-          'POST /audio/compress - Compressor dinâmico (file, threshold, ratio, attack, release)',
-          'POST /audio/normalize - Normalização de loudness (file)',
-          'POST /audio/fade - Fade in/out (file, duration)',
-          'POST /audio/eq - Equalização (file, bass, treble)',
-          'POST /audio/crossfade - Crossfade entre 2 áudios (audio1, audio2, duration)',
-          'POST /audio/gate - Remove ruído de fundo (file, threshold)',
+          'POST /audio/normalize-mp3 - Normaliza + MP3 44100Hz',
+          'POST /audio/normalize-ogg - Normaliza + OGG/Vorbis 44100Hz',
+          '🆕 POST /audio/normalize-whatsapp - Normaliza + OGG/Opus pra WhatsApp PTT',
+          'POST /audio/reverb-normalize-mp3 - Reverb+Normaliza+Volume+MP3',
+          'POST /audio/reverb-normalize-ogg - Reverb+Normaliza+Volume+OGG',
+          'POST /audio/mix - Mix 2 áudios sobrepostos',
+          'POST /audio/concat - Concatenar áudios em sequência',
+          'POST /audio/reverb - Adiciona reverb',
+          'POST /audio/compress - Compressor dinâmico',
+          'POST /audio/normalize - Normalização de loudness',
+          'POST /audio/fade - Fade in/out',
+          'POST /audio/eq - Equalização',
+          'POST /audio/crossfade - Crossfade entre 2 áudios',
+          'POST /audio/gate - Remove ruído de fundo',
         ],
         info: [
-          'POST /probe - Informações do arquivo de áudio (file)',
+          'POST /probe - Informações do arquivo de áudio',
         ]
       },
       video: {
         conversion: [
-          'POST /convert/video/to/mp4 - Converter vídeo para MP4 (file, crf, preset)',
-          'POST /convert/video/to/webm - Converter vídeo para WebM VP9 (file, crf)',
-          'POST /convert/video/to/gif - Converter vídeo para GIF animado (file, fps, width)',
+          'POST /convert/video/to/mp4',
+          'POST /convert/video/to/webm',
+          'POST /convert/video/to/gif',
         ],
         processing: [
-          'POST /video/resize - Redimensionar vídeo (file, width, height)',
-          'POST /video/trim - Cortar vídeo (file, start, duration)',
-          'POST /video/compress - Comprimir vídeo (file, crf, preset, maxWidth)',
-          'POST /video/speed - Alterar velocidade (file, speed)',
-          'POST /video/rotate - Rotacionar vídeo (file, angle: 90|180|270)',
-          'POST /video/concat - Concatenar vídeos (videos[])',
-          'POST /video/watermark - Marca d\'água (video, watermark, position, opacity)',
-          'POST /video/remove-audio - Remover áudio (file)',
+          'POST /video/resize',
+          'POST /video/trim',
+          'POST /video/compress',
+          'POST /video/speed',
+          'POST /video/rotate',
+          'POST /video/concat',
+          'POST /video/watermark',
+          'POST /video/remove-audio',
         ],
         audioVideo: [
-          'POST /video/extract-audio - Extrair áudio de vídeo (file, format)',
-          'POST /video/add-audio - Adicionar áudio a vídeo (video, audio, replace)',
+          'POST /video/extract-audio',
+          'POST /video/add-audio',
         ],
         generation: [
-          '🔥 POST /video/html-to-mp4 - HTML animado → MP4 (html, width, height, duration, fps, crf, preset, format, transparent)',
-          '🔥 POST /video/url-to-mp4 - Gravar URL como vídeo (url, width, height, duration, fps, waitForSelector)',
-          'POST /video/images-to-video - Slideshow de imagens (images[], durationPerImage, fps, width, height)',
-          'POST /video/text-to-video - Texto animado → vídeo (text, duration, fontSize, fontColor, bgColor, animation)',
+          '🔥 POST /video/html-to-mp4',
+          '🔥 POST /video/url-to-mp4',
+          'POST /video/images-to-video',
+          'POST /video/text-to-video',
         ],
         info: [
-          'POST /video/probe - Informações detalhadas do vídeo (file)',
-          'POST /video/thumbnail - Gerar thumbnail do vídeo (file, timestamp, width)',
+          'POST /video/probe',
+          'POST /video/thumbnail',
         ],
         transitions: [
-          '✨ GET /video/transitions - Listar todas as 55+ transições disponíveis com categorias',
-          '✨ POST /video/transition - Transição entre 2 vídeos (video1, video2, transition, transitionDuration)',
-          '✨ POST /video/concat-transition - Concatenar múltiplos vídeos COM transições (videos[], transition, transitions[], transitionDuration)',
+          '✨ GET /video/transitions',
+          '✨ POST /video/transition',
+          '✨ POST /video/concat-transition',
         ]
       }
     }
@@ -1583,7 +1504,8 @@ app.get('/', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 FFmpeg Media API v3.0.0 rodando na porta ${PORT}`);
+  console.log(`🚀 FFmpeg Media API v3.1.0 rodando na porta ${PORT}`);
   console.log(`📡 Endpoints: áudio, vídeo, HTML→MP4`);
+  console.log(`🎙️  WhatsApp PTT: /convert/audio/to/whatsapp`);
   console.log(`🌐 http://localhost:${PORT}`);
 });
