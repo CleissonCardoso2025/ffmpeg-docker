@@ -42,6 +42,23 @@ function ensureDir(dirPath) {
   if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
 }
 
+function parseTimestamp(ts) {
+  if (typeof ts === 'number') return ts;
+  if (!ts) throw new Error('Timestamp inválido');
+  const parts = String(ts).split(':').map(Number);
+  if (parts.some(isNaN)) throw new Error('Formato de timestamp inválido');
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return parts[0];
+}
+
+function formatTimestamp(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
 // ─────────────────────────────────────────────────────
 // 🎵 ÁUDIO — Endpoints existentes
 // ─────────────────────────────────────────────────────
@@ -642,6 +659,129 @@ app.post('/video/trim', upload.single('file'), (req, res) => {
       res.status(500).json({ error: err.message });
     })
     .save(output);
+});
+
+app.post('/video/trim-from-url', (req, res) => {
+  const { url_video, url_audio, start, end, format = 'mp4' } = req.body;
+
+  if (!url_video && format !== 'mp3') {
+    return res.status(400).json({ error: 'url_video é obrigatório', code: 'INVALID_URL' });
+  }
+  if (!url_video && !url_audio) {
+    return res.status(400).json({ error: 'Forneça url_video ou url_audio', code: 'INVALID_URL' });
+  }
+  if (url_video && !/^https?:\/\//.test(url_video)) {
+    return res.status(400).json({ error: 'url_video deve começar com http:// ou https://', code: 'INVALID_URL' });
+  }
+  if (url_audio && !/^https?:\/\//.test(url_audio)) {
+    return res.status(400).json({ error: 'url_audio deve começar com http:// ou https://', code: 'INVALID_URL' });
+  }
+
+  let startSec, endSec;
+  try {
+    startSec = parseTimestamp(start);
+    endSec = parseTimestamp(end);
+    if (endSec <= startSec) throw new Error('end deve ser maior que start');
+  } catch (err) {
+    return res.status(400).json({ error: err.message, code: 'INVALID_TIMESTAMP' });
+  }
+
+  const outputId = uuidv4();
+  const tmpDir = '/tmp/ffmpeg-trim';
+  ensureDir(tmpDir);
+  const outputPath = `${tmpDir}/${outputId}.${format}`;
+  const startFmt = formatTimestamp(startSec);
+  const endFmt = formatTimestamp(endSec);
+
+  console.log(`[trim-from-url] Iniciando corte`);
+  console.log(`  URL: ${url_video ? url_video.substring(0, 100) : url_audio.substring(0, 100)}...`);
+  console.log(`  Trecho: ${startFmt} → ${endFmt}`);
+  console.log(`  Format: ${format}`);
+  console.log(`  Merge audio: ${!!url_audio}`);
+
+  const startTimeObj = Date.now();
+  let cmd = ffmpeg();
+  let responseSent = false;
+
+  const timeoutId = setTimeout(() => {
+    if (!responseSent) {
+      responseSent = true;
+      cmd.kill('SIGKILL');
+      cleanupFiles([outputPath]);
+      res.status(504).json({ error: 'Timeout de processamento (5 minutos)', code: 'TIMEOUT' });
+    }
+  }, 5 * 60 * 1000);
+
+  const finalize = () => {
+    clearTimeout(timeoutId);
+    if (!responseSent) {
+      cleanupFiles([outputPath]);
+    }
+  };
+
+  res.on('finish', () => finalize());
+  res.on('close', () => finalize());
+
+  if (format === 'mp3') {
+    const inputUrl = url_audio || url_video;
+    cmd.input(inputUrl)
+       .inputOptions([`-ss ${startSec}`, `-to ${endSec}`])
+       .outputOptions(['-vn', '-c:a libmp3lame', '-b:a 192k']);
+  } else if (url_video && url_audio) {
+    cmd.input(url_video)
+       .inputOptions([`-ss ${startSec}`, `-to ${endSec}`])
+       .input(url_audio)
+       .inputOptions([`-ss ${startSec}`, `-to ${endSec}`])
+       .outputOptions([
+         '-map 0:v',
+         '-map 1:a',
+         '-c:v copy',
+         '-c:a aac',
+         '-b:a 192k',
+         '-movflags +faststart'
+       ]);
+  } else {
+    cmd.input(url_video)
+       .inputOptions([`-ss ${startSec}`, `-to ${endSec}`])
+       .outputOptions(['-c copy', '-movflags +faststart']);
+  }
+
+  cmd.output(outputPath)
+     .on('end', () => {
+       if (responseSent) return;
+       responseSent = true;
+       clearTimeout(timeoutId);
+       
+       const elapsed = ((Date.now() - startTimeObj) / 1000).toFixed(1);
+       let sizeMB = '0.00';
+       try {
+         if (fs.existsSync(outputPath)) {
+           const stat = fs.statSync(outputPath);
+           sizeMB = (stat.size / (1024 * 1024)).toFixed(2);
+         }
+       } catch (e) {}
+       
+       console.log(`[trim-from-url] ✅ Concluído em ${elapsed}s | Tamanho: ${sizeMB}MB`);
+       res.download(outputPath, `trim_${startSec}.${format}`, () => {
+         cleanupFiles([outputPath]);
+       });
+     })
+     .on('error', (err, stdout, stderr) => {
+       if (responseSent) return;
+       responseSent = true;
+       clearTimeout(timeoutId);
+       cleanupFiles([outputPath]);
+       
+       const errStr = err.message || '';
+       if (errStr.includes('SIGKILL')) return;
+       
+       res.status(500).json({
+         error: 'Erro no processamento do FFmpeg',
+         code: 'FFMPEG_ERROR',
+         details: stderr || err.message
+       });
+     })
+     .run();
 });
 
 app.post('/video/thumbnail', upload.single('file'), (req, res) => {

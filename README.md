@@ -84,6 +84,7 @@ A API ficará disponível em `http://localhost:9000`
 | --------------------- | ------ | ---------------------------------------------------- | ----------------------------------------------------------------- |
 | `/video/resize`       | POST   | **Redimensiona** o vídeo para qualquer resolução     | `file`, `width`, `height`                                         |
 | `/video/trim`         | POST   | **Corta** um trecho do vídeo por timestamp           | `file`, `start` (HH:MM:SS), `duration` (HH:MM:SS)                 |
+| `/video/trim-from-url`| POST   | 🆕 **Corta trecho de URL remota** — recebe URL (ex: googlevideo) e corta via streaming HTTP, sem baixar arquivo inteiro. Suporta merge de vídeo+áudio | `url_video`, `url_audio` (opc), `start`, `end`, `format` |
 | `/video/compress`     | POST   | **Comprime** o vídeo reduzindo tamanho do arquivo    | `file`, `crf`, `preset`, `maxWidth`                               |
 | `/video/speed`        | POST   | **Altera velocidade** — acelera ou câmera lenta      | `file`, `speed` (2.0=2x, 0.5=metade)                              |
 | `/video/rotate`       | POST   | **Rotaciona** o vídeo                                | `file`, `angle` (90, 180, 270)                                    |
@@ -303,6 +304,31 @@ curl -X POST http://localhost:9000/video/url-to-mp4 \
   -d '{"url":"https://example.com","duration":10,"fps":30}' --output gravacao.mp4
 ```
 
+### 🆕 Cortar vídeo de URL remota (sem baixar arquivo inteiro)
+
+```bash
+# Cortar trecho de vídeo do YouTube (URL googlevideo) com merge de áudio
+curl -X POST http://localhost:9000/video/trim-from-url \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url_video": "https://rr12.googlevideo.com/videoplayback?...itag=299...",
+    "url_audio": "https://rr12.googlevideo.com/videoplayback?...itag=140...",
+    "start": "00:04:00",
+    "end": "00:06:50",
+    "format": "mp4"
+  }' --output corte.mp4
+
+# Cortar só áudio (mp3)
+curl -X POST http://localhost:9000/video/trim-from-url \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url_audio": "https://rr12.googlevideo.com/videoplayback?...itag=140...",
+    "start": "00:04:00",
+    "end": "00:06:50",
+    "format": "mp3"
+  }' --output audio.mp3
+```
+
 ---
 
 ## ⚙️ Parâmetros do WhatsApp PTT
@@ -349,12 +375,12 @@ curl -X POST http://localhost:9000/video/url-to-mp4 \
 | Áudio — Combinar         | 3                |
 | Áudio — Info             | 1                |
 | Vídeo — Conversão        | 3                |
-| Vídeo — Processamento    | 8                |
+| Vídeo — Processamento    | 9                |
 | Vídeo — Áudio↔Vídeo      | 2                |
 | Vídeo — Info             | 2                |
 | ✨ Transições            | 3 (55+ efeitos)  |
 | 🔥 Geração de Vídeo      | 4                |
-| **Total**                | **41 endpoints** |
+| **Total**                | **42 endpoints** |
 
 ---
 
