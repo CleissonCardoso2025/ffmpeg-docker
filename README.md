@@ -396,3 +396,32 @@ curl -X POST http://localhost:9000/video/trim-from-url \
 ## 📝 Licença
 
 MIT
+
+---
+
+## 🍪 Configurando Cookies do YouTube
+
+O YouTube detecta downloads de servidores (Datacenters/VPS) e bloqueia com erro "Sign in to confirm you're not a bot". Para corrigir isso, o `yt-dlp` agora exige cookies e runtime JavaScript (Deno instalado nativamente nesta imagem).
+
+**Como obter seus cookies:**
+1. Use uma conta SECUNDÁRIA do YouTube (risco de ban/suspensão).
+2. Instale a extensão "Get cookies.txt LOCALLY" no navegador Chrome/Firefox.
+3. Acesse o YouTube logado, clique na extensão e exporte em formato Netscape.
+
+**Como enviar para o servidor:**
+
+Opção A: Salvar direto via SCP/volume
+Renomeie o arquivo para `youtube.txt` e coloque na pasta `cookies/` raiz do projeto.
+
+Opção B: Via API (fácil)
+Envie o arquivo encodado em base64:
+```bash
+curl -X POST http://localhost:9000/youtube/cookies \
+  -H "Content-Type: application/json" \
+  -d '{
+    "secret": "seu-secret-definido-no-.env",
+    "cookies_b64": "'$(base64 -w 0 youtube_cookies.txt)'"
+  }'
+```
+
+⚠️ **Atenção**: Os cookies expiram em média a cada 30 dias. Cheque o endpoint `/youtube/health` para ver o status dos cookies!

@@ -3,6 +3,11 @@ services:
     build: .
     ports:
       - "9000:3000"
+    volumes:
+      - ./cookies:/app/cookies
+    environment:
+      - COOKIES_UPLOAD_SECRET=${COOKIES_UPLOAD_SECRET:-}
+      - YOUTUBE_COOKIES_PATH=${YOUTUBE_COOKIES_PATH:-}
     networks:
       - dokploy-network
     restart: unless-stopped

@@ -1642,14 +1642,92 @@ app.get('/', (req, res) => {
   });
 });
 
-app.get('/youtube/health', (req, res) => {
-  try {
-    const ytDlpVersion = execSync('yt-dlp --version', { encoding: 'utf-8' }).trim();
-    const ffmpegVersionRaw = execSync('ffmpeg -version', { encoding: 'utf-8' }).split('\n')[0];
-    res.json({ status: 'ok', 'yt-dlp': ytDlpVersion, ffmpeg: ffmpegVersionRaw });
-  } catch (err) {
-    res.status(500).json({ error: 'Erro ao checar binários', details: err.message });
+function resolveCookiesPath(req) {
+  if (req.body.cookies_b64) {
+    const tmpCookiePath = `/tmp/cookies_${Date.now()}_${uuidv4()}.txt`;
+    const decoded = Buffer.from(req.body.cookies_b64, 'base64').toString('utf8');
+    fs.writeFileSync(tmpCookiePath, decoded, { mode: 0o600 });
+    return { path: tmpCookiePath, isTemp: true };
   }
+  
+  if (process.env.YOUTUBE_COOKIES_PATH && fs.existsSync(process.env.YOUTUBE_COOKIES_PATH)) {
+    return { path: process.env.YOUTUBE_COOKIES_PATH, isTemp: false };
+  }
+  
+  if (fs.existsSync('/app/cookies/youtube.txt')) {
+    return { path: '/app/cookies/youtube.txt', isTemp: false };
+  }
+  
+  return { path: null, isTemp: false };
+}
+
+app.post('/youtube/cookies', express.json({ limit: '5mb' }), (req, res) => {
+  const { cookies_b64, secret } = req.body;
+  
+  if (!process.env.COOKIES_UPLOAD_SECRET) {
+    return res.status(503).json({ error: 'Upload desabilitado — defina COOKIES_UPLOAD_SECRET' });
+  }
+  
+  if (secret !== process.env.COOKIES_UPLOAD_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  
+  if (!cookies_b64) {
+    return res.status(400).json({ error: 'cookies_b64 obrigatório' });
+  }
+  
+  try {
+    const decoded = Buffer.from(cookies_b64, 'base64').toString('utf8');
+    
+    if (!decoded.includes('# Netscape HTTP Cookie File') && !decoded.includes('.youtube.com')) {
+      return res.status(400).json({ error: 'Formato inválido — esperado cookies.txt Netscape' });
+    }
+    
+    ensureDir('/app/cookies');
+    fs.writeFileSync('/app/cookies/youtube.txt', decoded, { mode: 0o600 });
+    
+    res.json({ 
+      ok: true, 
+      message: 'Cookies atualizados',
+      size_bytes: decoded.length,
+      lines: decoded.split('\n').length
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Falha ao salvar cookies', details: err.message });
+  }
+});
+
+async function getCommandVersion(cmd, arg) {
+  try {
+    const { execSync } = require('child_process');
+    return execSync(`${cmd} ${arg}`, { encoding: 'utf-8' }).split('\n')[0].trim();
+  } catch (e) {
+    return null;
+  }
+}
+
+app.get('/youtube/health', async (req, res) => {
+  const ytdlpVersion = await getCommandVersion('yt-dlp', '--version');
+  const ffmpegVersion = await getCommandVersion('ffmpeg', '-version');
+  const denoVersion = await getCommandVersion('deno', '--version');
+  
+  const cookiesPath = '/app/cookies/youtube.txt';
+  const cookiesExist = fs.existsSync(cookiesPath);
+  const cookiesAge = cookiesExist 
+    ? Math.floor((Date.now() - fs.statSync(cookiesPath).mtimeMs) / 1000 / 86400)
+    : null;
+  
+  res.json({
+    ok: true,
+    ytdlp_version: ytdlpVersion,
+    ffmpeg_version: ffmpegVersion,
+    deno_version: denoVersion,
+    deno_available: !!denoVersion,
+    cookies_loaded: cookiesExist,
+    cookies_age_days: cookiesAge,
+    cookies_warning: cookiesAge > 25 ? 'Cookies podem estar expirados (>25 dias)' : null,
+    cookies_upload_enabled: !!process.env.COOKIES_UPLOAD_SECRET
+  });
 });
 
 app.post('/youtube/trim', (req, res) => {
@@ -1675,42 +1753,85 @@ app.post('/youtube/trim', (req, res) => {
   
   const startStr = formatTimestamp(startSec);
   const endStr = formatTimestamp(endSec);
-
   const formatStr = `bestvideo[height<=${quality}]+bestaudio/best`;
   
-  const cmdStr = `yt-dlp -f "${formatStr}" --download-sections "*${startStr}-${endStr}" --force-keyframes-at-cuts -o "${outputPath}" "${youtube_url}"`;
+  const cookieInfo = resolveCookiesPath(req);
+  const cookiesPath = cookieInfo.path;
+  const isTempCookie = cookieInfo.isTemp;
+
+  const ytdlpArgs = [
+    '--no-playlist',
+    '--no-warnings',
+    '--download-sections', `*${startStr}-${endStr}`,
+    '--force-keyframes-at-cuts',
+    '--js-runtimes', 'deno',
+    '--extractor-args', 'youtube:player_client=default,web_safari,mweb',
+    '--user-agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+  ];
+
+  if (cookiesPath) {
+    ytdlpArgs.push('--cookies', cookiesPath);
+    console.log(`[youtube-trim] 🍪 cookies loaded from ${cookiesPath}`);
+  } else {
+    ytdlpArgs.push('--impersonate', 'safari');
+    console.log(`[youtube-trim] 🍪 no cookies, falling back to impersonate`);
+  }
+
+  ytdlpArgs.push('-f', formatStr, '-o', outputPath, youtube_url);
 
   let responseSent = false;
+  console.log(`[youtube-trim] 🎬 ytdlp Baixando: ${youtube_url} | ${startStr} -> ${endStr} | res: ${quality}p`);
   
-  console.log(`[youtube-trim] Baixando: ${youtube_url} | ${startStr} -> ${endStr} | res: ${quality}p`);
+  const { spawn } = require('child_process');
+  const ytProcess = spawn('yt-dlp', ytdlpArgs);
   
-  exec(cmdStr, { timeout: 10 * 60 * 1000 }, (error, stdout, stderr) => {
+  let stderrData = '';
+  ytProcess.stderr.on('data', (data) => {
+    stderrData += data.toString();
+  });
+  
+  const timeoutId = setTimeout(() => {
+    if (!responseSent) {
+      responseSent = true;
+      ytProcess.kill('SIGKILL');
+      cleanupFiles(isTempCookie ? [outputPath, cookiesPath] : [outputPath]);
+      res.status(504).json({ error: 'Timeout de processamento (10 minutos)' });
+    }
+  }, 10 * 60 * 1000);
+
+  ytProcess.on('close', (code) => {
+    clearTimeout(timeoutId);
     if (responseSent) return;
     responseSent = true;
     
-    if (error) {
-      cleanupFiles([outputPath]);
+    if (code !== 0) {
+      cleanupFiles(isTempCookie ? [outputPath, cookiesPath] : [outputPath]);
+      console.log(`[youtube-trim] ❌ erro yt-dlp: exit code ${code}`);
       return res.status(500).json({ 
         error: 'Erro no yt-dlp', 
-        details: stderr || error.message 
+        details: stderrData 
       });
     }
 
     if (!fs.existsSync(outputPath)) {
-      return res.status(500).json({ error: 'Arquivo final não gerado pelo yt-dlp', details: stdout });
+      cleanupFiles(isTempCookie ? [cookiesPath] : []);
+      return res.status(500).json({ error: 'Arquivo final não gerado pelo yt-dlp', details: stderrData });
     }
 
     const refinedPath = `${tmpDir}/refined-${outputId}.${format}`;
+    console.log(`[youtube-trim] ✂️ ffmpeg refinando video`);
+    
     ffmpeg(outputPath)
       .outputOptions(['-c copy', '-movflags +faststart'])
       .on('end', () => {
         console.log(`[youtube-trim] ✅ Refinado e enviando`);
         res.download(refinedPath, `youtube_trim_${outputId}.${format}`, () => {
-          cleanupFiles([outputPath, refinedPath]);
+          cleanupFiles(isTempCookie ? [outputPath, refinedPath, cookiesPath] : [outputPath, refinedPath]);
         });
       })
       .on('error', (ffmpegErr) => {
-        cleanupFiles([outputPath, refinedPath]);
+        cleanupFiles(isTempCookie ? [outputPath, refinedPath, cookiesPath] : [outputPath, refinedPath]);
+        console.log(`[youtube-trim] ❌ erro ffmpeg refine: ${ffmpegErr.message}`);
         res.status(500).json({ error: 'Erro no ffmpeg refine', details: ffmpegErr.message });
       })
       .save(refinedPath);

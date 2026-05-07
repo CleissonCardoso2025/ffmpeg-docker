@@ -1,30 +1,42 @@
-FROM node:18-alpine
+FROM node:18-bookworm-slim
 
-# FFmpeg + Chromium + dependências para Puppeteer
-RUN apk add --no-cache \
+# FFmpeg + Chromium + dependências
+RUN apt-get update && apt-get install -y --no-install-recommends \
   ffmpeg \
   chromium \
-  nss \
-  freetype \
-  harfbuzz \
   ca-certificates \
-  font-noto \
-  font-noto-emoji \
-  ttf-freefont \
-  ttf-liberation \
+  fonts-liberation \
+  fonts-noto-color-emoji \
+  fonts-freefont-ttf \
   fontconfig \
   python3 \
-  py3-pip \
+  python3-pip \
+  curl \
+  unzip \
+  && rm -rf /var/lib/apt/lists/* \
   && fc-cache -f -v
 
-RUN pip install --no-cache-dir yt-dlp --break-system-packages
+# Instalar Deno nativo
+RUN curl -fsSL https://deno.land/install.sh | sh -s -- -y \
+    && mv /root/.deno/bin/deno /usr/local/bin/deno \
+    && chmod +x /usr/local/bin/deno \
+    && deno --version
 
-# Puppeteer config para Alpine
+# Instalar yt-dlp e dependências pro impersonate
+RUN pip3 install --no-cache-dir --break-system-packages \
+    "yt-dlp[default]" \
+    yt-dlp-ejs \
+    curl_cffi
+
+# Puppeteer config para Debian
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
-ENV CHROMIUM_PATH=/usr/bin/chromium-browser
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV CHROMIUM_PATH=/usr/bin/chromium
 
 WORKDIR /app
+
+# Criar pasta de cookies
+RUN mkdir -p /app/cookies && chmod 700 /app/cookies
 
 COPY package.json ./
 RUN npm install
