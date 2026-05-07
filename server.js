@@ -1642,6 +1642,81 @@ app.get('/', (req, res) => {
   });
 });
 
+app.get('/youtube/health', (req, res) => {
+  try {
+    const ytDlpVersion = execSync('yt-dlp --version', { encoding: 'utf-8' }).trim();
+    const ffmpegVersionRaw = execSync('ffmpeg -version', { encoding: 'utf-8' }).split('\n')[0];
+    res.json({ status: 'ok', 'yt-dlp': ytDlpVersion, ffmpeg: ffmpegVersionRaw });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao checar binários', details: err.message });
+  }
+});
+
+app.post('/youtube/trim', (req, res) => {
+  const { youtube_url, start, end, format = 'mp4', quality = '1080' } = req.body;
+
+  if (!youtube_url || !start || !end) {
+    return res.status(400).json({ error: 'Faltam campos: youtube_url, start, end' });
+  }
+
+  let startSec, endSec;
+  try {
+    startSec = parseTimestamp(start);
+    endSec = parseTimestamp(end);
+    if (endSec <= startSec) throw new Error('end deve ser maior que start');
+  } catch (err) {
+    return res.status(400).json({ error: 'Timestamps inválidos: ' + err.message });
+  }
+
+  const outputId = uuidv4();
+  const tmpDir = '/tmp/youtube-trim';
+  ensureDir(tmpDir);
+  const outputPath = `${tmpDir}/${outputId}.${format}`;
+  
+  const startStr = formatTimestamp(startSec);
+  const endStr = formatTimestamp(endSec);
+
+  const formatStr = `bestvideo[height<=${quality}]+bestaudio/best`;
+  
+  const cmdStr = `yt-dlp -f "${formatStr}" --download-sections "*${startStr}-${endStr}" --force-keyframes-at-cuts -o "${outputPath}" "${youtube_url}"`;
+
+  let responseSent = false;
+  
+  console.log(`[youtube-trim] Baixando: ${youtube_url} | ${startStr} -> ${endStr} | res: ${quality}p`);
+  
+  exec(cmdStr, { timeout: 10 * 60 * 1000 }, (error, stdout, stderr) => {
+    if (responseSent) return;
+    responseSent = true;
+    
+    if (error) {
+      cleanupFiles([outputPath]);
+      return res.status(500).json({ 
+        error: 'Erro no yt-dlp', 
+        details: stderr || error.message 
+      });
+    }
+
+    if (!fs.existsSync(outputPath)) {
+      return res.status(500).json({ error: 'Arquivo final não gerado pelo yt-dlp', details: stdout });
+    }
+
+    const refinedPath = `${tmpDir}/refined-${outputId}.${format}`;
+    ffmpeg(outputPath)
+      .outputOptions(['-c copy', '-movflags +faststart'])
+      .on('end', () => {
+        console.log(`[youtube-trim] ✅ Refinado e enviando`);
+        res.download(refinedPath, `youtube_trim_${outputId}.${format}`, () => {
+          cleanupFiles([outputPath, refinedPath]);
+        });
+      })
+      .on('error', (ffmpegErr) => {
+        cleanupFiles([outputPath, refinedPath]);
+        res.status(500).json({ error: 'Erro no ffmpeg refine', details: ffmpegErr.message });
+      })
+      .save(refinedPath);
+  });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 FFmpeg Media API v3.1.0 rodando na porta ${PORT}`);

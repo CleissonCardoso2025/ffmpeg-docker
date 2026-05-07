@@ -13,7 +13,11 @@ RUN apk add --no-cache \
   ttf-freefont \
   ttf-liberation \
   fontconfig \
+  python3 \
+  py3-pip \
   && fc-cache -f -v
+
+RUN pip install --no-cache-dir yt-dlp --break-system-packages
 
 # Puppeteer config para Alpine
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
