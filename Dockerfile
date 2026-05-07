@@ -23,10 +23,9 @@ RUN curl -fsSL https://deno.land/install.sh | sh -s -- -y \
     && deno --version
 
 # Instalar yt-dlp e dependências pro impersonate
-RUN pip3 install --no-cache-dir --break-system-packages \
-    "yt-dlp[default]" \
-    yt-dlp-ejs \
-    curl_cffi
+RUN pip3 install --no-cache-dir --break-system-packages -U \
+    "yt-dlp[default,curl-cffi]" \
+    yt-dlp-ejs
 
 # Puppeteer config para Debian
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
