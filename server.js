@@ -1773,8 +1773,7 @@ app.post('/youtube/trim', (req, res) => {
     '--download-sections', `*${startStr}-${endStr}`,
     '--force-keyframes-at-cuts',
     '--js-runtimes', 'deno',
-    '--extractor-args', 'youtube:player_client=default,web_safari,mweb',
-    '--user-agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+    '--extractor-args', 'youtube:player_client=default,web_safari,mweb'
   ];
 
   if (cookiesPath) {
