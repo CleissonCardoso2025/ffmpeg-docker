@@ -1710,6 +1710,13 @@ app.get('/youtube/health', async (req, res) => {
   const ytdlpVersion = await getCommandVersion('yt-dlp', '--version');
   const ffmpegVersion = await getCommandVersion('ffmpeg', '-version');
   const denoVersion = await getCommandVersion('deno', '--version');
+  let impersonateTargets = "";
+  try {
+    const { execSync } = require('child_process');
+    impersonateTargets = execSync('yt-dlp --list-impersonate-targets', { encoding: 'utf-8' }).trim();
+  } catch (e) {
+    impersonateTargets = "Erro: " + e.message;
+  }
   
   const cookiesPath = '/app/cookies/youtube.txt';
   const cookiesExist = fs.existsSync(cookiesPath);
@@ -1723,6 +1730,7 @@ app.get('/youtube/health', async (req, res) => {
     ffmpeg_version: ffmpegVersion,
     deno_version: denoVersion,
     deno_available: !!denoVersion,
+    impersonate_targets: impersonateTargets,
     cookies_loaded: cookiesExist,
     cookies_age_days: cookiesAge,
     cookies_warning: cookiesAge > 25 ? 'Cookies podem estar expirados (>25 dias)' : null,
