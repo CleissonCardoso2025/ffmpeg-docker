@@ -62,11 +62,18 @@ A API ficará disponível em `http://localhost:9000`
 | `/audio/concat`    | POST   | **Concatena áudios em sequência** — junta 2 a 10 áudios **um depois do outro** | `audios[]` (form-data), `format` (mp3/wav/ogg) |
 | `/audio/crossfade` | POST   | **Crossfade entre 2 áudios** — transição suave do primeiro para o segundo      | `audio1`, `audio2` (form-data), `duration`     |
 
-### 🎵 ÁUDIO — Informações
-
-| Endpoint | Método | Descrição                                                                     | Parâmetros         |
-| -------- | ------ | ----------------------------------------------------------------------------- | ------------------ |
 | `/probe` | POST   | Retorna **informações técnicas** do arquivo: formato, codec, duração, bitrate | `file` (form-data) |
+
+### 🎙️ ÁUDIO — Captura de Stream (Live Radio)
+
+| Endpoint                         | Método | Descrição                                                                                             | Parâmetros                                                                 |
+| -------------------------------- | ------ | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| 🆕 `/audio/record-stream`        | POST   | **Grava um stream ao vivo** (HTTP/HLS/RTMP) por tempo definido e retorna o arquivo                    | `stream_url`, `duration`, `format` (mp3), `bitrate`, `sampleRate`, `channels` |
+| 🆕 `/audio/record-stream-async`  | POST   | **Versão assíncrona** — Grava em background, retorna `job_id`. Suporta webhook.                        | Mesmos acima + `webhook_url`, `callback_data`                              |
+| 🆕 `/audio/record-stream/:job_id/status` | GET    | Consulta o **progresso e status** da gravação em tempo real                                           | `job_id` (URL)                                                             |
+| 🆕 `/audio/record-stream/:job_id/download` | GET    | **Download** do arquivo gravado após conclusão                                                        | `job_id` (URL)                                                             |
+
+---
 
 ---
 
@@ -278,6 +285,49 @@ curl -X POST http://localhost:9000/audio/concat \
   --output podcast-completo.mp3
 ```
 
+### 🎙️ Gravação de Rádio Online / Streams Live
+
+```bash
+# Gravação síncrona (espera terminar e baixa) - 30 segundos
+curl -X POST http://localhost:9000/audio/record-stream \
+  -H "Content-Type: application/json" \
+  -d '{
+    "stream_url": "http://stream.radiocidade.com/live",
+    "duration": 30,
+    "format": "mp3",
+    "bitrate": "128k"
+  }' --output radio_corte.mp3
+
+# Gravação assíncrona (retorna job_id imediato) - 1 hora (3600s)
+curl -X POST http://localhost:9000/audio/record-stream-async \
+  -H "Content-Type: application/json" \
+  -d '{
+    "stream_url": "https://shoutcast.stream.com/live",
+    "duration": 3600,
+    "webhook_url": "https://seu-n8n.webhook.com/abc-123"
+  }'
+
+# Consultar status do job
+curl http://localhost:9000/audio/record-stream/rec_abc123/status
+
+# Download após concluir
+curl http://localhost:9000/audio/record-stream/rec_abc123/download --output gravacao_longa.mp3
+```
+
+#### 🚀 Exemplo de Integração com n8n
+
+```
+[Schedule Trigger 06:00] 
+       ↓ 
+[HTTP POST /audio/record-stream-async] 
+       ↓ (recebe job_id)
+[Webhook listener (n8n)] 
+       ↓ (recebe notificação 'completed')
+[HTTP GET /download] 
+       ↓ binary
+[Whisper Transcription / Store S3]
+```
+
 ### 🎬 Vídeo — Outros exemplos
 
 ```bash
@@ -374,13 +424,14 @@ curl -X POST http://localhost:9000/video/trim-from-url \
 | Áudio — Processamento    | 11 (🆕 +1 WhatsApp) |
 | Áudio — Combinar         | 3                |
 | Áudio — Info             | 1                |
+| 🎙️ ÁUDIO — Captura Live  | 4 (🆕 NOVO)      |
 | Vídeo — Conversão        | 3                |
 | Vídeo — Processamento    | 9                |
 | Vídeo — Áudio↔Vídeo      | 2                |
 | Vídeo — Info             | 2                |
 | ✨ Transições            | 3 (55+ efeitos)  |
 | 🔥 Geração de Vídeo      | 4                |
-| **Total**                | **42 endpoints** |
+| **Total**                | **46 endpoints** |
 
 ---
 

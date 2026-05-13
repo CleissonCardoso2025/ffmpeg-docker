@@ -22,6 +22,10 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// 🎙️ NOVOS ENDPOINTS — ÁUDIO CAPTURA
+const audioStreamRoutes = require('./src/routes/audio-stream');
+app.use('/audio', audioStreamRoutes);
+
 // ─────────────────────────────────────────────────────
 // 🔧 UTILIDADES
 // ─────────────────────────────────────────────────────
@@ -1848,7 +1852,7 @@ app.post('/youtube/trim', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 FFmpeg Media API v3.1.0 rodando na porta ${PORT}`);
-  console.log(`📡 Endpoints: áudio, vídeo, HTML→MP4`);
-  console.log(`🎙️  WhatsApp PTT: /convert/audio/to/whatsapp`);
+  console.log(`📡 Endpoints: áudio (captura live!), vídeo, HTML→MP4`);
+  console.log(`🎙️  Total de Endpoints: 46`);
   console.log(`🌐 http://localhost:${PORT}`);
 });
