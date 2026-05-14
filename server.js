@@ -16,7 +16,10 @@ try {
 }
 
 const app = express();
-const upload = multer({ dest: '/tmp/uploads/', limits: { fileSize: 500 * 1024 * 1024 } }); // 500MB
+const os = require('os');
+const uploadDir = path.join(os.tmpdir(), 'ffmpeg-uploads');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+const upload = multer({ dest: uploadDir, limits: { fileSize: 500 * 1024 * 1024 } }); // 500MB
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -1658,8 +1661,16 @@ function resolveCookiesPath(req) {
     return { path: process.env.YOUTUBE_COOKIES_PATH, isTemp: false };
   }
   
-  if (fs.existsSync('/app/cookies/youtube.txt')) {
-    return { path: '/app/cookies/youtube.txt', isTemp: false };
+  const possiblePaths = [
+    '/app/cookies/youtube.txt',
+    path.join(__dirname, 'cookies/youtube.txt'),
+    path.join(process.cwd(), 'cookies/youtube.txt')
+  ];
+
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      return { path: p, isTemp: false };
+    }
   }
   
   return { path: null, isTemp: false };

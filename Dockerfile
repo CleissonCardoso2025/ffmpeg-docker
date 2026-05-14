@@ -34,14 +34,19 @@ ENV CHROMIUM_PATH=/usr/bin/chromium
 
 WORKDIR /app
 
-# Criar pasta de cookies
-RUN mkdir -p /app/cookies && chmod 700 /app/cookies
+# Criar pasta de cookies e data
+RUN mkdir -p /app/cookies /app/data && chmod 700 /app/cookies /app/data
 
 COPY package.json ./
 RUN npm install
 
+# Copiar código fonte
 COPY server.js ./
+COPY src/ ./src/
 
 EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:3000/ || exit 1
 
 CMD ["npm", "start"]

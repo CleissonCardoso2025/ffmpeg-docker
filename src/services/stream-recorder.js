@@ -35,6 +35,10 @@ class StreamRecorder {
 
   saveJobs() {
     try {
+      const dataDir = path.dirname(JOBS_FILE);
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
       const data = Object.fromEntries(this.jobs);
       fs.writeFileSync(JOBS_FILE, JSON.stringify(data, null, 2));
     } catch (err) {
