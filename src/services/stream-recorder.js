@@ -101,6 +101,8 @@ class StreamRecorder {
     const baseUrl = params.baseUrl || '';
     job.download_url = `${baseUrl}/audio/record-stream/${jobId}/download`;
     job.file_url = job.download_url; // Compatibilidade com workflows n8n
+
+    const ffmpegCmd = ffmpeg(stream_url)
       .inputOptions([
         '-reconnect 1',
         '-reconnect_streamed 1',
