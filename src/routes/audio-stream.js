@@ -12,6 +12,10 @@ const fs = require('fs');
 router.post('/record-stream', async (req, res) => {
   try {
     const params = validateStreamParams(req.body);
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    params.baseUrl = `${protocol}://${host}`;
+    
     console.log(`[POST /audio/record-stream] Iniciando gravação síncrona: ${params.stream_url} (${params.duration}s)`);
     
     const job = await streamRecorder.record(params, false);
@@ -41,6 +45,10 @@ router.post('/record-stream-async', async (req, res) => {
     const params = validateStreamParams(req.body);
     params.webhook_url = req.body.webhook_url;
     params.callback_data = req.body.callback_data;
+    
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    params.baseUrl = `${protocol}://${host}`;
     
     console.log(`[POST /audio/record-stream-async] Iniciando gravação assíncrona: ${params.stream_url}`);
     

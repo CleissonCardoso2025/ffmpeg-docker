@@ -97,7 +97,10 @@ class StreamRecorder {
     this.jobs.set(jobId, job);
     this.saveJobs();
 
-    const ffmpegCmd = ffmpeg(stream_url)
+    // Base URL para links absolutos
+    const baseUrl = params.baseUrl || '';
+    job.download_url = `${baseUrl}/audio/record-stream/${jobId}/download`;
+    job.file_url = job.download_url; // Compatibilidade com workflows n8n
       .inputOptions([
         '-reconnect 1',
         '-reconnect_streamed 1',
@@ -220,6 +223,7 @@ class StreamRecorder {
       duration_seconds: job.elapsed_seconds,
       file_size_bytes: job.file_size_bytes,
       download_url: job.download_url,
+      file_url: job.file_url, // Compatibilidade com n8n
       callback_data: job.callback_data
     };
 
