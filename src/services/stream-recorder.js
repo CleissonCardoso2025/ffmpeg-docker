@@ -104,12 +104,16 @@ class StreamRecorder {
 
     const ffmpegCmd = ffmpeg(stream_url)
       .inputOptions([
-        '-reconnect 1',
-        '-reconnect_streamed 1',
-        '-reconnect_delay_max 5',
-        '-user_agent "Mozilla/5.0 (compatible; RadioRecorder/1.0)"'
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '5',
+        '-user_agent', 'Mozilla/5.0 (compatible; RadioRecorder/1.0)'
       ])
       .duration(duration);
+
+    ffmpegCmd.on('start', (commandLine) => {
+      console.log(`[StreamRecorder] FFmpeg executando: ${commandLine}`);
+    });
 
     // Audio settings
     if (format === 'mp3') {
