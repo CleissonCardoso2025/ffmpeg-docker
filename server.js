@@ -29,6 +29,10 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 const audioStreamRoutes = require('./src/routes/audio-stream');
 app.use('/audio', audioStreamRoutes);
 
+// 📻 NOVO ENDPOINT — MONTAGEM DE BOLETIM DE RÁDIO
+const audioBoletimRoutes = require('./src/routes/audio-boletim');
+app.use('/audio', audioBoletimRoutes);
+
 // ─────────────────────────────────────────────────────
 // 🔧 UTILIDADES
 // ─────────────────────────────────────────────────────
@@ -1862,8 +1866,8 @@ app.post('/youtube/trim', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 FFmpeg Media API v3.1.0 rodando na porta ${PORT}`);
-  console.log(`📡 Endpoints: áudio (captura live!), vídeo, HTML→MP4`);
-  console.log(`🎙️  Total de Endpoints: 46`);
+  console.log(`🚀 FFmpeg Media API v3.2.0 rodando na porta ${PORT}`);
+  console.log(`📡 Endpoints: áudio (captura live + boletim de rádio!), vídeo, HTML→MP4`);
+  console.log(`🎙️  Total de Endpoints: 47`);
   console.log(`🌐 http://localhost:${PORT}`);
 });

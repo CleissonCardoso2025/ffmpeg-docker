@@ -1,12 +1,16 @@
-# 🎬 FFmpeg Media API v3.1.0
+# 🎬 FFmpeg Media API v3.2.0
 
-API REST profissional para processamento de **áudio**, **vídeo**, **transições**, **HTML animado → MP4** e **conversão para WhatsApp PTT (mensagem de voz)** usando FFmpeg + Puppeteer.
+API REST profissional para processamento de **áudio**, **vídeo**, **transições**, **HTML animado → MP4**, **conversão para WhatsApp PTT** e **montagem de boletins de rádio** usando FFmpeg + Puppeteer.
 
 Desenvolvida com Node.js, Express, fluent-ffmpeg e puppeteer-core.
 
 ---
 
-## 🆕 Novidades v3.1.0
+## 🆕 Novidades v3.2.0
+
+- 📻 **`/audio/montar-boletim`** — Monta um **boletim de rádio completo** combinando trilha, voz e vinheta final com ducking automático de trilha
+
+## Novidades v3.1.0
 
 - 🎙️ **`/convert/audio/to/whatsapp`** — Converte qualquer áudio em **OGG/Opus** otimizado pra mensagem de voz do WhatsApp (PTT)
 - 🎙️ **`/audio/normalize-whatsapp`** — Versão pro com normalização de loudness + Opus, ideal pra áudios de TTS
@@ -63,6 +67,12 @@ A API ficará disponível em `http://localhost:9000`
 | `/audio/crossfade` | POST   | **Crossfade entre 2 áudios** — transição suave do primeiro para o segundo      | `audio1`, `audio2` (form-data), `duration`     |
 
 | `/probe` | POST   | Retorna **informações técnicas** do arquivo: formato, codec, duração, bitrate | `file` (form-data) |
+
+### 📻 ÁUDIO — Boletim de Rádio (NOVO)
+
+| Endpoint                  | Método | Descrição                                                                                             | Parâmetros                                                                                   |
+| ------------------------- | ------ | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| 🆕 `/audio/montar-boletim` | POST   | **Monta um boletim de rádio completo** — combina trilha + voz + vinheta com ducking automático da trilha | `trilha`, `voz`, `vinheta_final`, `delay_voz`, `volume_trilha_ducking`, `fade_vinheta` |
 
 ### 🎙️ ÁUDIO — Captura de Stream (Live Radio)
 
@@ -155,6 +165,75 @@ A API ficará disponível em `http://localhost:9000`
 ---
 
 ## 💡 Exemplos de Uso
+
+### 📻 Montar Boletim de Rádio (NOVO)
+
+```bash
+# Boletim padrão: delay 9s, ducking 30%, fade 300ms
+curl -X POST https://ffmpeg.cleissoncardoso.com/audio/montar-boletim \
+  -F "trilha=@trilha.mp3" \
+  -F "voz=@locucao.mp3" \
+  -F "vinheta_final=@vinheta.mp3" \
+  --output boletim.mp3
+
+# Boletim com parâmetros customizados
+curl -X POST https://ffmpeg.cleissoncardoso.com/audio/montar-boletim \
+  -F "trilha=@trilha.mp3" \
+  -F "voz=@locucao.mp3" \
+  -F "vinheta_final=@vinheta.mp3" \
+  -F "delay_voz=5" \
+  -F "volume_trilha_ducking=0.2" \
+  -F "fade_vinheta=0.5" \
+  --output boletim_customizado.mp3
+
+# Boletim via URLs (sem upload de arquivo)
+curl -X POST https://ffmpeg.cleissoncardoso.com/audio/montar-boletim \
+  -F "trilha=https://cdn.example.com/trilha.mp3" \
+  -F "voz=https://cdn.example.com/locucao.mp3" \
+  -F "vinheta_final=https://cdn.example.com/vinheta.mp3" \
+  --output boletim_url.mp3
+```
+
+**Timeline do áudio gerado:**
+
+```
+0s ────── 9s ──────────────────── (9 + dur_voz)s ──── FIM
+│  TRILHA  │  TRILHA 30% + VOZ    │  VINHETA FINAL    │
+│  100%    │  (ducking automático) │  (fade-in suave)  │
+```
+
+#### Integração n8n — Workflow de boletim automático
+
+```
+[Webhook ou Schedule]
+    ↓
+[HTTP Request: GET trilha/voz/vinheta dos assets]
+    ↓ binários
+[HTTP POST /audio/montar-boletim]
+    ↓ binary MP3
+[Supabase Storage / S3 Upload]
+    ↓ url pública
+[Publicar no site / WhatsApp / Telegram]
+```
+
+**Configuração no node HTTP Request do n8n:**
+
+```
+Method:           POST
+URL:              https://ffmpeg.cleissoncardoso.com/audio/montar-boletim
+Body Content Type: Form-Data
+Body Parameters:
+  ├─ trilha        → Binary File (campo do binary com a trilha)
+  ├─ voz           → Binary File (campo do binary com a locução)
+  ├─ vinheta_final → Binary File (campo do binary com a vinheta)
+  ├─ delay_voz     → 9
+  └─ volume_trilha_ducking → 0.3
+Response:
+  Response Format:    File
+  Put Output in Field: data
+```
+
+---
 
 ### 🎙️ WhatsApp PTT — Mensagem de Voz (NOVO)
 
@@ -416,22 +495,38 @@ curl -X POST http://localhost:9000/video/trim-from-url \
 
 ---
 
+## ⚙️ Parâmetros do Boletim de Rádio
+
+| Parâmetro                 | Tipo           | Padrão  | Obrigatório | Descrição                                                              |
+| ------------------------- | -------------- | ------- | ----------- | ---------------------------------------------------------------------- |
+| `trilha`                  | file ou URL    | —       | ✅           | Música de fundo (MP3). Upload via `multipart` ou URL no campo `trilha` |
+| `voz`                     | file ou URL    | —       | ✅           | Locução já normalizada (MP3)                                           |
+| `vinheta_final`           | file ou URL    | —       | ✅           | Vinheta de encerramento (MP3)                                          |
+| `delay_voz`               | número (s)     | `9`     | ❌           | Segundos de silêncio antes da voz entrar (a trilha toca 100% nesse período) |
+| `volume_trilha_ducking`   | número (0–1)   | `0.3`   | ❌           | Volume da trilha quando a voz está tocando (0.3 = 30%)                 |
+| `fade_vinheta`            | número (s)     | `0.3`   | ❌           | Duração do crossfade entre o corpo do boletim e a vinheta final        |
+
+**📤 Resposta:** `audio/mpeg` — arquivo MP3 pronto para veiculação, com headers `X-Processing-Time` e `X-File-Size-KB`.
+
+---
+
 ## 📊 Resumo Total de Endpoints
 
 | Categoria                | Quantidade       |
 | ------------------------ | ---------------- |
-| Áudio — Conversão        | 4 (🆕 +1 WhatsApp) |
-| Áudio — Processamento    | 11 (🆕 +1 WhatsApp) |
+| Áudio — Conversão        | 4                |
+| Áudio — Processamento    | 11               |
 | Áudio — Combinar         | 3                |
 | Áudio — Info             | 1                |
-| 🎙️ ÁUDIO — Captura Live  | 4 (🆕 NOVO)      |
+| 📻 ÁUDIO — Boletim Rádio | 1 (🆕 NOVO)      |
+| 🎙️ ÁUDIO — Captura Live  | 4                |
 | Vídeo — Conversão        | 3                |
 | Vídeo — Processamento    | 9                |
 | Vídeo — Áudio↔Vídeo      | 2                |
 | Vídeo — Info             | 2                |
 | ✨ Transições            | 3 (55+ efeitos)  |
 | 🔥 Geração de Vídeo      | 4                |
-| **Total**                | **46 endpoints** |
+| **Total**                | **47 endpoints** |
 
 ---
 
