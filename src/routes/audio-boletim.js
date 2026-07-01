@@ -144,6 +144,7 @@ router.post(
     try {
       // ── 1. Parâmetros opcionais ──────────────────────────
       const delayVoz = parseFloat(req.body.delay_voz ?? 9);
+      const volumeTrilha = parseFloat(req.body.volume_trilha ?? 1.0);
       const volumeDucking = parseFloat(req.body.volume_trilha_ducking ?? 0.3);
       const fadeVinheta = parseFloat(req.body.fade_vinheta ?? 0.3);
 
@@ -151,9 +152,13 @@ router.post(
         clearTimeout(timeoutId);
         return res.status(400).json({ error: '`delay_voz` deve ser um número >= 0', code: 'INVALID_PARAM' });
       }
-      if (isNaN(volumeDucking) || volumeDucking < 0 || volumeDucking > 1) {
+      if (isNaN(volumeTrilha) || volumeTrilha < 0) {
         clearTimeout(timeoutId);
-        return res.status(400).json({ error: '`volume_trilha_ducking` deve estar entre 0.0 e 1.0', code: 'INVALID_PARAM' });
+        return res.status(400).json({ error: '`volume_trilha` deve ser um número >= 0', code: 'INVALID_PARAM' });
+      }
+      if (isNaN(volumeDucking) || volumeDucking < 0) {
+        clearTimeout(timeoutId);
+        return res.status(400).json({ error: '`volume_trilha_ducking` deve ser um número >= 0', code: 'INVALID_PARAM' });
       }
       if (isNaN(fadeVinheta) || fadeVinheta < 0) {
         clearTimeout(timeoutId);
@@ -217,7 +222,7 @@ router.post(
       //
       // Lógica:
       //   [1:a] → voz com adelay (delay_voz * 1000 ms em cada canal)
-      //   [0:a] → trilha com volume dinâmico: 100% antes de delay_voz, ducking% depois
+      //   [0:a] → trilha com volume dinâmico: volume_trilha antes de delay_voz, ducking% depois
       //   amix dos dois → "corpo" (trilha some quando a voz termina, via duration=shortest + apad mínimo)
       //   acrossfade "corpo" → vinheta_final com fade suave
       //
@@ -226,7 +231,7 @@ router.post(
         // Voz com delay
         `[1:a]adelay=${delayMs}|${delayMs}[voz_delay]`,
         // Trilha com volume dinâmico (eval=frame necessário para atualizar a cada frame)
-        `[0:a]volume='if(lt(t,${delayVoz}),1.0,${volumeDucking})':eval=frame[trilha_dinamica]`,
+        `[0:a]volume='if(lt(t,${delayVoz}),${volumeTrilha},${volumeDucking})':eval=frame[trilha_dinamica]`,
         // Mix trilha + voz — usa shortest para parar quando a voz terminar
         `[trilha_dinamica][voz_delay]amix=inputs=2:duration=shortest:dropout_transition=0[corpo]`,
         // Crossfade do corpo com a vinheta final

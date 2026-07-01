@@ -74,7 +74,14 @@ A API ficará disponível em `http://localhost:9000`
 
 | Endpoint                  | Método | Descrição                                                                                             | Parâmetros                                                                                   |
 | ------------------------- | ------ | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| 🆕 `/audio/montar-boletim` | POST   | **Monta um boletim de rádio completo** — combina trilha + voz + vinheta com ducking automático da trilha | `trilha`, `voz`, `vinheta_final`, `delay_voz`, `volume_trilha_ducking`, `fade_vinheta` |
+| 🆕 `/audio/montar-boletim` | POST   | **Monta um boletim de rádio completo** — combina trilha + voz + vinheta com ducking automático da trilha | `trilha`, `voz`, `vinheta_final`, `volume_trilha`, `delay_voz`, `volume_trilha_ducking`, `fade_vinheta` |
+
+### ⚙️ Detalhes: /audio/montar-boletim
+
+O endpoint cria um áudio mixado em que a trilha toca de fundo e a voz entra após um delay.
+- **`volume_trilha`** (padrão `1.0`): Define o volume inicial da música de fundo (trilha).
+- **`volume_trilha_ducking`** (padrão `0.3`): Define o volume da trilha no momento em que a voz entra. 
+  > 💡 **Dica:** Você pode usar isso tanto para diminuir quanto para aumentar o volume! Para *abaixar* a trilha (ducking), envie um valor menor que `volume_trilha` (ex: `0.3`). Para dar um *ganho* na trilha quando a voz entrar, basta enviar um valor maior (ex: se `volume_trilha` for `0.5`, envie o ducking como `1.5`).
 
 ### 🎙️ ÁUDIO — Captura de Stream (Live Radio)
 
@@ -84,6 +91,18 @@ A API ficará disponível em `http://localhost:9000`
 | 🆕 `/audio/record-stream-async`  | POST   | **Versão assíncrona** — Grava em background, retorna `job_id`. Suporta webhook.                        | Mesmos acima + `webhook_url`, `callback_data`                              |
 | 🆕 `/audio/record-stream/:job_id/status` | GET    | Consulta o **progresso e status** da gravação em tempo real                                           | `job_id` (URL)                                                             |
 | 🆕 `/audio/record-stream/:job_id/download` | GET    | **Download** do arquivo gravado após conclusão                                                        | `job_id` (URL)                                                             |
+
+### ⚙️ Detalhes: /audio/compress
+
+O endpoint usa o filtro `acompressor` do FFmpeg e sempre retorna no formato **WAV**. 
+Se os parâmetros não forem informados, a API utiliza os seguintes valores padrão:
+
+| Parâmetro   | Range (Limites) | Unidade / Tipo | Valor Padrão |
+|-------------|-----------------|----------------|--------------|
+| `threshold` | 0.00097 a 1.0   | Linear         | `0.089` (~ -21dB) |
+| `ratio`     | 1 a 20          | Proporção      | `9`          |
+| `attack`    | 0.01 a 2000     | Milissegundos  | `200`        |
+| `release`   | 0.01 a 9000     | Milissegundos  | `1000`       |
 
 ---
 
