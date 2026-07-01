@@ -74,6 +74,83 @@ function formatTimestamp(seconds) {
 // 🎵 ÁUDIO — Endpoints existentes
 // ─────────────────────────────────────────────────────
 
+// Endpoint: Alterar pitch sem alterar a velocidade
+app.post('/audio/pitch', upload.single('file'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
+  }
+
+  const pitch = parseFloat(req.body.pitch) || 1.0;
+  let format = (req.body.format || 'mp3').toLowerCase();
+  const validFormats = ['mp3', 'wav', 'ogg'];
+  if (!validFormats.includes(format)) {
+    format = 'mp3';
+  }
+
+  const output = `/tmp/pitch-${Date.now()}.${format}`;
+  const startTime = Date.now();
+  let responseSent = false;
+
+  ffmpeg.ffprobe(req.file.path, (err, metadata) => {
+    if (err) {
+      cleanupFiles([req.file.path]);
+      return res.status(500).json({ error: 'Erro ao analisar arquivo de áudio com ffprobe.' });
+    }
+
+    let sampleRate = 44100; // Default
+    if (metadata && metadata.streams && metadata.streams.length > 0) {
+      const audioStream = metadata.streams.find(s => s.codec_type === 'audio');
+      if (audioStream && audioStream.sample_rate) {
+        sampleRate = parseInt(audioStream.sample_rate, 10);
+      }
+    }
+
+    const filterStr = `asetrate=${sampleRate}*${pitch},aresample=${sampleRate},atempo=1/${pitch}`;
+
+    let ffmpegCmd = ffmpeg(req.file.path).audioFilters(filterStr);
+
+    if (format === 'mp3') {
+      ffmpegCmd = ffmpegCmd.toFormat('mp3').audioCodec('libmp3lame');
+    } else if (format === 'ogg') {
+      ffmpegCmd = ffmpegCmd.toFormat('ogg').audioCodec('libvorbis');
+    } else if (format === 'wav') {
+      ffmpegCmd = ffmpegCmd.toFormat('wav');
+    }
+
+    ffmpegCmd
+      .on('end', () => {
+        if (responseSent) return;
+        responseSent = true;
+
+        let sizeKB = '?';
+        try {
+          const stat = fs.statSync(output);
+          sizeKB = (stat.size / 1024).toFixed(0);
+        } catch (_) {}
+
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+        let mimeType = 'audio/mpeg';
+        if (format === 'wav') mimeType = 'audio/wav';
+        if (format === 'ogg') mimeType = 'audio/ogg';
+
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Content-Disposition', `attachment; filename="pitch_modified.${format}"`);
+        res.setHeader('X-Processing-Time', `${elapsed}s`);
+        res.setHeader('X-File-Size-KB', sizeKB);
+
+        res.download(output, `pitch_modified.${format}`, () => cleanupFiles([req.file.path, output]));
+      })
+      .on('error', (err) => {
+        if (responseSent) return;
+        responseSent = true;
+        cleanupFiles([req.file.path, output]);
+        res.status(500).json({ error: err.message });
+      })
+      .save(output);
+  });
+});
+
 // Endpoint: Converter para MP3
 app.post('/convert/audio/to/mp3', upload.single('file'), (req, res) => {
   const output = `/tmp/output-${Date.now()}.mp3`;

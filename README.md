@@ -9,6 +9,7 @@ Desenvolvida com Node.js, Express, fluent-ffmpeg e puppeteer-core.
 ## 🆕 Novidades v3.2.0
 
 - 📻 **`/audio/montar-boletim`** — Monta um **boletim de rádio completo** combinando trilha, voz e vinheta final com ducking automático de trilha
+- 🎵 **`/audio/pitch`** — Altera o tom (pitch) do áudio sem alterar a velocidade (ex: voz mais aguda ou grave)
 
 ## Novidades v3.1.0
 
@@ -50,6 +51,7 @@ A API ficará disponível em `http://localhost:9000`
 | `/audio/normalize-mp3`           | POST   | Normaliza volume com controle total + converte para **MP3 44100Hz**                                                | `file`, `loudness`, `truePeak`, `lra`, `volumeBoost`, `bitrate`                   |
 | `/audio/normalize-ogg`           | POST   | Normaliza volume + converte para **OGG 44100Hz**                                                                   | `file`, `loudness`, `truePeak`, `lra`, `volumeBoost`, `bitrate`                   |
 | 🆕 `/audio/normalize-whatsapp`    | POST   | 🎙️ Normaliza loudness + converte para **OGG/Opus pro WhatsApp PTT**. Ideal pra áudios de TTS com volume baixo       | `file`, `loudness`, `truePeak`, `lra`, `volumeBoost`, `bitrate` (padrão `64k`)    |
+| 🆕 `/audio/pitch`                 | POST   | **Altera o tom (pitch)** do áudio sem alterar a velocidade. Deixa a voz mais grave ou aguda                        | `file`, `pitch` (padrão `1.0`), `format` (padrão `mp3`)                           |
 | `/audio/reverb`                  | POST   | Adiciona efeito de **reverberação** (eco). Simula som em ambientes como igrejas                                    | `file`, `decay`, `delay`                                                          |
 | `/audio/compress`                | POST   | **Compressor dinâmico** — reduz diferença entre partes altas e baixas. Essencial para podcasts                     | `file`, `threshold`, `ratio`, `attack`, `release`                                 |
 | `/audio/fade`                    | POST   | Adiciona **Fade In** no início e **Fade Out** no final                                                             | `file`, `duration` (segundos)                                                     |
