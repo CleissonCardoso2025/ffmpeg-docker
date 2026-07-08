@@ -207,7 +207,9 @@ router.post(
         });
       }
 
-      console.log(`[montar-boletim] Job ${jobId} | delay=${delayVoz}s | ducking=${volumeDucking} | fade=${fadeVinheta}s`);
+      console.log(`[montar-boletim] Job ${jobId} iniciado.`);
+      console.log(`[montar-boletim] Parâmetros: delay_voz=${delayVoz}s | fade_vinheta=${fadeVinheta}s`);
+      console.log(`[montar-boletim] Volumes (ganhos) aplicados: trilha(antes)=${volumeTrilha}, trilha(durante_ducking)=${volumeDucking}, voz=1.0 (inalterada), vinheta_final=1.0 (inalterada)`);
 
       // ── 4. Obter a duração real da voz ──────────────────
       let vozDuration;
@@ -246,7 +248,8 @@ router.post(
         `[0:a]volume='if(lt(t,${delayVoz}),${volumeTrilha},${volumeDucking})':eval=frame,afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${fadeOutDuration},apad[trilha_ducked]`,
         
         // 3. Mixa a trilha infinita e a voz. duration=shortest fará o mix acabar EXATAMENTE quando a voz real terminar na prática.
-        `[trilha_ducked][voz_delay]amix=inputs=2:duration=shortest:dropout_transition=0[corpo]`,
+        // 3. Mixa a trilha infinita e a voz. normalize=0 evita que o amix reduza o ganho das entradas (comum em amix=inputs=2).
+        `[trilha_ducked][voz_delay]amix=inputs=2:duration=shortest:dropout_transition=0:normalize=0[corpo]`,
         
         // 4. Vinheta final com fade-in opcional
         fadeVinheta > 0
@@ -279,7 +282,8 @@ router.post(
 
       ffmpegCmd
         .on('start', (cmd) => {
-          console.log(`[montar-boletim] FFmpeg iniciado: ${cmd.substring(0, 200)}...`);
+          console.log(`[montar-boletim] FilterComplex aplicado:\n${filterComplex.split(';').join(';\n')}`);
+          console.log(`[montar-boletim] FFmpeg comando completo: ${cmd}`);
         })
         .on('end', () => {
           if (responseSent) return;
