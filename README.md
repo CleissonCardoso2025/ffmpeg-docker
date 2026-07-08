@@ -9,6 +9,7 @@ Desenvolvida com Node.js, Express, fluent-ffmpeg e puppeteer-core.
 ## 🆕 Novidades v3.2.0
 
 - 📻 **`/audio/montar-boletim`** — Monta um **boletim de rádio completo** combinando trilha, voz e vinheta final com ducking automático de trilha
+- 🎙️ **`/audio/radio-voice`** — Masterização automática de locução para rádio (Gate, EQ, Compressão, Loudness)
 - 🎵 **`/audio/pitch`** — Altera o tom (pitch) do áudio sem alterar a velocidade (ex: voz mais aguda ou grave)
 
 ## Novidades v3.1.0
@@ -50,6 +51,7 @@ A API ficará disponível em `http://localhost:9000`
 | `/audio/normalize`               | POST   | **Normaliza o volume** do áudio para padrão broadcast (EBU R128). Ideal para deixar todos os áudios no mesmo nível | `file`                                                                            |
 | `/audio/normalize-mp3`           | POST   | Normaliza volume com controle total + converte para **MP3 44100Hz**                                                | `file`, `loudness`, `truePeak`, `lra`, `volumeBoost`, `bitrate`                   |
 | `/audio/normalize-ogg`           | POST   | Normaliza volume + converte para **OGG 44100Hz**                                                                   | `file`, `loudness`, `truePeak`, `lra`, `volumeBoost`, `bitrate`                   |
+| 🆕 `/audio/radio-voice`           | POST   | **Masterização p/ Rádio**: Noise Gate + EQ + Compressor + Loudnorm. Transforma vozes cruas em locução pronta p/ rádio | `file`, `profile` (radio/podcast/whatsapp/news), `format`, `bitrate`              |
 | 🆕 `/audio/normalize-whatsapp`    | POST   | 🎙️ Normaliza loudness + converte para **OGG/Opus pro WhatsApp PTT**. Ideal pra áudios de TTS com volume baixo       | `file`, `loudness`, `truePeak`, `lra`, `volumeBoost`, `bitrate` (padrão `64k`)    |
 | 🆕 `/audio/pitch`                 | POST   | **Altera o tom (pitch)** do áudio sem alterar a velocidade. Deixa a voz mais grave ou aguda                        | `file`, `pitch` (padrão `1.0`), `format` (padrão `mp3`)                           |
 | `/audio/reverb`                  | POST   | Adiciona efeito de **reverberação** (eco). Simula som em ambientes como igrejas                                    | `file`, `decay`, `delay`                                                          |
@@ -255,6 +257,49 @@ Body Parameters:
 Response:
   Response Format:    File
   Put Output in Field: data
+```
+
+---
+
+### 🎙️ Processamento de Voz para Rádio (NOVO)
+
+Transforma qualquer locução (humana ou gerada via IA, como Gemini, ElevenLabs, Fish Audio) em uma locução com qualidade masterizada de Rádio FM, executando Noise Gate, EQ focado em voz, Compressão e Normalização de Loudness em uma única chamada!
+
+```bash
+# Processar com o perfil padrão (radio)
+curl -X POST http://localhost:9000/audio/radio-voice \
+  -F "file=@locucao_crua.wav" \
+  --output locucao_pronta_radio.mp3
+
+# Processar para perfil podcast com maior dinâmica (em WAV)
+curl -X POST http://localhost:9000/audio/radio-voice \
+  -F "file=@locucao_crua.wav" \
+  -F "profile=podcast" \
+  -F "format=wav" \
+  --output locucao_podcast.wav
+```
+
+#### Perfis disponíveis:
+- **`radio` (padrão):** Otimizado para FM. EQ para rádio (cortes de graves em 80/300Hz, ganho alto de presença entre 3-8kHz), compressão média, Loudness fixo em -16 LUFS.
+- **`podcast`:** EQ mais quente e plano, compressão leve, dinâmica maior, Loudness de -18 LUFS.
+- **`whatsapp`:** Reduz graves pesados (para não estourar alto falante de celular) e reforça agudos; compressão forte, Loudness otimizado em -14 LUFS.
+- **`news`:** Máxima inteligibilidade. Reforço severo nas frequências vocais de clareza (3-8kHz), compressão dura e Loudness fixo de -16 LUFS.
+
+#### Parâmetros Opcionais:
+- `profile`: `radio` (padrão), `podcast`, `whatsapp` ou `news`.
+- `format`: `mp3` (padrão), `wav` ou `ogg`.
+- `bitrate`: Padrão é `192k`.
+
+**Integração n8n:**
+```
+Method:           POST
+URL:              https://ffmpeg.cleissoncardoso.com/audio/radio-voice
+Body Content Type: Form-Data
+Body Parameters:
+  ├─ file         → Binary File
+  └─ profile      → "podcast" (opcional)
+Response:
+  Response Format:    File
 ```
 
 ---

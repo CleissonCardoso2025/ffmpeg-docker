@@ -239,28 +239,25 @@ router.post(
       const fadeOutStart = Math.max(0, fimVoz - fadeOutDuration);
 
       const filterComplex = [
-        // 1. Voz com delay
+        // 1. Voz com delay (não usamos apad aqui para que ela defina o fim natural do mix)
         `[1:a]adelay=${delayMs}|${delayMs}[voz_delay]`,
         
-        // 2. Trilha com volume dinâmico (ducking)
-        `[0:a]volume='if(lt(t,${delayVoz}),${volumeTrilha},${volumeDucking})':eval=frame[trilha_ducked]`,
+        // 2. Trilha com volume dinâmico, aplica o fade-out no tempo do fim da voz, e apad (torna infinita)
+        `[0:a]volume='if(lt(t,${delayVoz}),${volumeTrilha},${volumeDucking})':eval=frame,afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${fadeOutDuration},apad[trilha_ducked]`,
         
-        // 3. Corta a trilha exatamente no fim da voz, ajusta pts e aplica fade-out
-        `[trilha_ducked]atrim=0:${fimVoz.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${fadeOutDuration}[trilha_cortada]`,
+        // 3. Mixa a trilha infinita e a voz. duration=shortest fará o mix acabar EXATAMENTE quando a voz real terminar na prática.
+        `[trilha_ducked][voz_delay]amix=inputs=2:duration=shortest:dropout_transition=0[corpo]`,
         
-        // 4. Mixa a trilha cortada e a voz (ambas terminam em fimVoz)
-        `[trilha_cortada][voz_delay]amix=inputs=2:duration=longest:dropout_transition=0[corpo]`,
-        
-        // 5. Vinheta final com fade-in opcional
+        // 4. Vinheta final com fade-in opcional
         fadeVinheta > 0
           ? `[2:a]afade=t=in:st=0:d=${fadeVinheta.toFixed(3)}[vinheta_fade]`
           : `[2:a]anull[vinheta_fade]`,
           
-        // 6. Padroniza os formatos antes do concat para evitar erros de canais diferentes
+        // 5. Padroniza os formatos antes do concat para evitar erros de canais diferentes
         `[corpo]aformat=sample_rates=44100:channel_layouts=stereo[corpo_fmt]`,
         `[vinheta_fade]aformat=sample_rates=44100:channel_layouts=stereo[vinheta_fmt]`,
         
-        // 7. Concatena o corpo com a vinheta sequencialmente
+        // 6. Concatena o corpo com a vinheta sequencialmente
         `[corpo_fmt][vinheta_fmt]concat=n=2:v=0:a=1[out]`
       ].join(';');
 

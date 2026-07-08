@@ -33,6 +33,10 @@ app.use('/audio', audioStreamRoutes);
 const audioBoletimRoutes = require('./src/routes/audio-boletim');
 app.use('/audio', audioBoletimRoutes);
 
+// 🎙️ NOVO ENDPOINT — VOZ PARA RÁDIO
+const audioVoiceRoutes = require('./src/routes/audio-voice');
+app.use('/audio', audioVoiceRoutes);
+
 // ─────────────────────────────────────────────────────
 // 🔧 UTILIDADES
 // ─────────────────────────────────────────────────────
