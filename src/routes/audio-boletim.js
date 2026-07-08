@@ -209,10 +209,18 @@ router.post(
 
       console.log(`[montar-boletim] Job ${jobId} | delay=${delayVoz}s | ducking=${volumeDucking} | fade=${fadeVinheta}s`);
 
-      // ── 4. Checar duração da voz (para log) ─────────────
-      let vozDuration = '?';
-      try { vozDuration = (await getAudioDuration(vozPath)).toFixed(1); } catch (_) {}
-      console.log(`[montar-boletim] Duração da voz: ${vozDuration}s`);
+      // ── 4. Obter a duração real da voz ──────────────────
+      let vozDuration;
+      try {
+        vozDuration = await getAudioDuration(vozPath);
+      } catch (err) {
+        clearTimeout(timeoutId);
+        cleanupFiles(tmpFiles);
+        return res.status(400).json({ error: 'Falha ao obter duração da voz: ' + err.message, code: 'INVALID_AUDIO' });
+      }
+
+      const fimVoz = delayVoz + vozDuration;
+      console.log(`[montar-boletim] Duração real da voz: ${vozDuration}s | Fim da voz: ${fimVoz}s`);
 
       // ── 5. Arquivo de saída ──────────────────────────────
       const outputPath = path.join(uploadDir, `boletim-${jobId}.mp3`);
@@ -222,20 +230,38 @@ router.post(
       //
       // Lógica:
       //   [1:a] → voz com adelay (delay_voz * 1000 ms em cada canal)
-      //   [0:a] → trilha com volume dinâmico: volume_trilha antes de delay_voz, ducking% depois
-      //   amix dos dois → "corpo" (trilha some quando a voz termina, via duration=shortest + apad mínimo)
-      //   acrossfade "corpo" → vinheta_final com fade suave
+      //   [0:a] → trilha com volume dinâmico e atrim para cortar no fim da voz
+      //   amix trilha + voz → "corpo" (agora usa duration=longest para não cortar a voz)
+      //   concat corpo + vinheta → vinheta entra apenas depois que o corpo terminar
       //
       const delayMs = Math.round(delayVoz * 1000);
+      const fadeOutDuration = 0.2; // 200 ms fade-out na trilha para evitar corte seco
+      const fadeOutStart = Math.max(0, fimVoz - fadeOutDuration);
+
       const filterComplex = [
-        // Voz com delay
+        // 1. Voz com delay
         `[1:a]adelay=${delayMs}|${delayMs}[voz_delay]`,
-        // Trilha com volume dinâmico (eval=frame necessário para atualizar a cada frame)
-        `[0:a]volume='if(lt(t,${delayVoz}),${volumeTrilha},${volumeDucking})':eval=frame[trilha_dinamica]`,
-        // Mix trilha + voz — usa shortest para parar quando a voz terminar
-        `[trilha_dinamica][voz_delay]amix=inputs=2:duration=shortest:dropout_transition=0[corpo]`,
-        // Crossfade do corpo com a vinheta final
-        `[corpo][2:a]acrossfade=d=${fadeVinheta}:c1=tri:c2=tri[out]`
+        
+        // 2. Trilha com volume dinâmico (ducking)
+        `[0:a]volume='if(lt(t,${delayVoz}),${volumeTrilha},${volumeDucking})':eval=frame[trilha_ducked]`,
+        
+        // 3. Corta a trilha exatamente no fim da voz, ajusta pts e aplica fade-out
+        `[trilha_ducked]atrim=0:${fimVoz.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${fadeOutDuration}[trilha_cortada]`,
+        
+        // 4. Mixa a trilha cortada e a voz (ambas terminam em fimVoz)
+        `[trilha_cortada][voz_delay]amix=inputs=2:duration=longest:dropout_transition=0[corpo]`,
+        
+        // 5. Vinheta final com fade-in opcional
+        fadeVinheta > 0
+          ? `[2:a]afade=t=in:st=0:d=${fadeVinheta.toFixed(3)}[vinheta_fade]`
+          : `[2:a]anull[vinheta_fade]`,
+          
+        // 6. Padroniza os formatos antes do concat para evitar erros de canais diferentes
+        `[corpo]aformat=sample_rates=44100:channel_layouts=stereo[corpo_fmt]`,
+        `[vinheta_fade]aformat=sample_rates=44100:channel_layouts=stereo[vinheta_fmt]`,
+        
+        // 7. Concatena o corpo com a vinheta sequencialmente
+        `[corpo_fmt][vinheta_fmt]concat=n=2:v=0:a=1[out]`
       ].join(';');
 
       // ── 7. Executar FFmpeg ───────────────────────────────

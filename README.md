@@ -215,12 +215,15 @@ curl -X POST https://ffmpeg.cleissoncardoso.com/audio/montar-boletim \
   --output boletim_url.mp3
 ```
 
-**Timeline do áudio gerado:**
+**Timeline exata do áudio gerado:**
 
-```
-0s ────── 9s ──────────────────── (9 + dur_voz)s ──── FIM
-│  TRILHA  │  TRILHA 30% + VOZ    │  VINHETA FINAL    │
-│  100%    │  (ducking automático) │  (fade-in suave)  │
+A trilha corta exatamente junto com a voz, com um fade-out rápido de 200ms para evitar cliques, e só então a vinheta inicia sequencialmente.
+
+```text
+0s ────── 9s (delay_voz) ──────── (9s + dur_voz)s ──────── FIM
+│  TRILHA  │  TRILHA 30% + VOZ    │                        │
+│  100%    │  (ducking automático) │  VINHETA FINAL         │
+│          │  (terminam juntas!)  │  (fade-in inicial)     │
 ```
 
 #### Integração n8n — Workflow de boletim automático
@@ -525,7 +528,7 @@ curl -X POST http://localhost:9000/video/trim-from-url \
 | `vinheta_final`           | file ou URL    | —       | ✅           | Vinheta de encerramento (MP3)                                          |
 | `delay_voz`               | número (s)     | `9`     | ❌           | Segundos de silêncio antes da voz entrar (a trilha toca 100% nesse período) |
 | `volume_trilha_ducking`   | número (0–1)   | `0.3`   | ❌           | Volume da trilha quando a voz está tocando (0.3 = 30%)                 |
-| `fade_vinheta`            | número (s)     | `0.3`   | ❌           | Duração do crossfade entre o corpo do boletim e a vinheta final        |
+| `fade_vinheta`            | número (s)     | `0.3`   | ❌           | Duração do fade-in aplicado no início da vinheta final (sem crossfade) |
 
 **📤 Resposta:** `audio/mpeg` — arquivo MP3 pronto para veiculação, com headers `X-Processing-Time` e `X-File-Size-KB`.
 
