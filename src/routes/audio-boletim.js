@@ -99,17 +99,21 @@ function getAudioDuration(filePath) {
 
 /**
  * Monta um boletim de rádio combinando:
- *   - trilha    → música de fundo
- *   - voz       → locução já normalizada
- *   - vinheta_final → vinheta de encerramento
+ *   - vinheta_inicio → vinheta de abertura (opcional)
+ *   - intro          → introdução em áudio (opcional)
+ *   - trilha         → música de fundo
+ *   - voz            → locução já normalizada
+ *   - vinheta_final  → vinheta de encerramento
  *
- * Timeline:
- *   0s ──── delay_voz ──── (delay_voz + dur_voz)s ──── FIM
- *   │  TRILHA 100%  │  TRILHA 30% + VOZ  │  VINHETA FINAL  │
+ * Sequence:
+ *   [vinheta_inicio (opcional)] ──> [intro (opcional)] ──> [corpo: trilha + voz com ducking] ──> [vinheta_final]
  */
 router.post(
   '/montar-boletim',
   upload.fields([
+    { name: 'vinheta_inicio', maxCount: 1 },
+    { name: 'vinheta inicio', maxCount: 1 },
+    { name: 'intro', maxCount: 1 },
     { name: 'trilha', maxCount: 1 },
     { name: 'voz', maxCount: 1 },
     { name: 'vinheta_final', maxCount: 1 }
@@ -165,10 +169,17 @@ router.post(
         return res.status(400).json({ error: '`fade_vinheta` deve ser um número >= 0', code: 'INVALID_PARAM' });
       }
 
-      // ── 2. Resolver os 3 arquivos (upload ou URL) ────────
-      const resolveInput = async (fieldName) => {
-        const uploadedFile = req.files?.[fieldName]?.[0];
-        const urlValue = req.body?.[`${fieldName}_url`] || req.body?.[fieldName];
+      // ── 2. Resolver os arquivos (upload ou URL) ──────────
+      const resolveInput = async (fieldName, alternateNames = []) => {
+        const names = [fieldName, ...alternateNames];
+        let uploadedFile = null;
+
+        for (const name of names) {
+          if (req.files?.[name]?.[0]) {
+            uploadedFile = req.files[name][0];
+            break;
+          }
+        }
 
         if (uploadedFile) {
           tmpFiles.push(uploadedFile.path);
@@ -176,23 +187,28 @@ router.post(
         }
 
         // Se não foi upload, tenta como URL no body (JSON ou form-data texto)
-        if (urlValue && /^https?:\/\//.test(urlValue)) {
-          const destPath = path.join(uploadDir, `${jobId}-${fieldName}.mp3`);
-          tmpFiles.push(destPath);
-          await downloadUrl(urlValue, destPath);
-          return destPath;
+        for (const name of names) {
+          const urlValue = req.body?.[`${name}_url`] || req.body?.[name];
+          if (urlValue && typeof urlValue === 'string' && /^https?:\/\//i.test(urlValue.trim())) {
+            const destPath = path.join(uploadDir, `${jobId}-${fieldName}.mp3`);
+            tmpFiles.push(destPath);
+            await downloadUrl(urlValue.trim(), destPath);
+            return destPath;
+          }
         }
 
         return null;
       };
 
-      const [trilhaPath, vozPath, vinheta_finalPath] = await Promise.all([
+      const [vinheta_inicioPath, introPath, trilhaPath, vozPath, vinheta_finalPath] = await Promise.all([
+        resolveInput('vinheta_inicio', ['vinheta inicio']),
+        resolveInput('intro'),
         resolveInput('trilha'),
         resolveInput('voz'),
         resolveInput('vinheta_final')
       ]);
 
-      // ── 3. Validar presença dos 3 arquivos ──────────────
+      // ── 3. Validar presença dos arquivos obrigatórios ────
       const missing = [];
       if (!trilhaPath) missing.push('trilha');
       if (!vozPath) missing.push('voz');
@@ -209,7 +225,7 @@ router.post(
 
       console.log(`[montar-boletim] Job ${jobId} iniciado.`);
       console.log(`[montar-boletim] Parâmetros: delay_voz=${delayVoz}s | fade_vinheta=${fadeVinheta}s`);
-      console.log(`[montar-boletim] Volumes (ganhos) aplicados: trilha(antes)=${volumeTrilha}, trilha(durante_ducking)=${volumeDucking}, voz=1.0 (inalterada), vinheta_final=1.0 (inalterada)`);
+      console.log(`[montar-boletim] Vinhetas/Intro ativas: inicio=${Boolean(vinheta_inicioPath)}, intro=${Boolean(introPath)}, final=${Boolean(vinheta_finalPath)}`);
 
       // ── 4. Obter a duração real da voz ──────────────────
       let vozDuration;
@@ -228,48 +244,81 @@ router.post(
       const outputPath = path.join(uploadDir, `boletim-${jobId}.mp3`);
       tmpFiles.push(outputPath);
 
-      // ── 6. Montar filter_complex parametrizado ───────────
-      //
-      // Lógica:
-      //   [1:a] → voz com adelay (delay_voz * 1000 ms em cada canal)
-      //   [0:a] → trilha com volume dinâmico e atrim para cortar no fim da voz
-      //   amix trilha + voz → "corpo" (agora usa duration=longest para não cortar a voz)
-      //   concat corpo + vinheta → vinheta entra apenas depois que o corpo terminar
-      //
+      // ── 6. Montar filter_complex e inputs dinâmicos ──────
+      const inputs = [];
+      const filterComplex = [];
+      const concatSegments = [];
+      let inputIndex = 0;
+
+      // 1. Vinheta Inicio (opcional)
+      if (vinheta_inicioPath) {
+        inputs.push(vinheta_inicioPath);
+        const vinIniIdx = inputIndex++;
+        if (fadeVinheta > 0) {
+          filterComplex.push(`[${vinIniIdx}:a]afade=t=in:st=0:d=${fadeVinheta.toFixed(3)}[vin_ini_fade]`);
+          filterComplex.push(`[vin_ini_fade]aformat=sample_rates=44100:channel_layouts=stereo[vin_ini_fmt]`);
+        } else {
+          filterComplex.push(`[${vinIniIdx}:a]aformat=sample_rates=44100:channel_layouts=stereo[vin_ini_fmt]`);
+        }
+        concatSegments.push('[vin_ini_fmt]');
+      }
+
+      // 2. Intro (opcional)
+      if (introPath) {
+        inputs.push(introPath);
+        const introIdx = inputIndex++;
+        filterComplex.push(`[${introIdx}:a]aformat=sample_rates=44100:channel_layouts=stereo[intro_fmt]`);
+        concatSegments.push('[intro_fmt]');
+      }
+
+      // 3. Trilha e voz (obrigatórios)
+      inputs.push(trilhaPath);
+      const trilhaIdx = inputIndex++;
+
+      inputs.push(vozPath);
+      const vozIdx = inputIndex++;
+
       const delayMs = Math.round(delayVoz * 1000);
       const fadeOutDuration = 0.2; // 200 ms fade-out na trilha para evitar corte seco
       const fadeOutStart = Math.max(0, fimVoz - fadeOutDuration);
 
-      const filterComplex = [
-        // 1. Voz com delay (não usamos apad aqui para que ela defina o fim natural do mix)
-        `[1:a]adelay=${delayMs}|${delayMs}[voz_delay]`,
-        
-        // 2. Trilha com volume dinâmico, aplica o fade-out no tempo do fim da voz, e apad (torna infinita)
-        `[0:a]volume='if(lt(t,${delayVoz}),${volumeTrilha},${volumeDucking})':eval=frame,afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${fadeOutDuration},apad[trilha_ducked]`,
-        
-        // 3. Mixa a trilha infinita e a voz. duration=shortest fará o mix acabar EXATAMENTE quando a voz real terminar na prática.
-        // 3. Mixa a trilha infinita e a voz. normalize=0 evita que o amix reduza o ganho das entradas (comum em amix=inputs=2).
-        `[trilha_ducked][voz_delay]amix=inputs=2:duration=shortest:dropout_transition=0:normalize=0[corpo]`,
-        
-        // 4. Vinheta final com fade-in opcional
-        fadeVinheta > 0
-          ? `[2:a]afade=t=in:st=0:d=${fadeVinheta.toFixed(3)}[vinheta_fade]`
-          : `[2:a]anull[vinheta_fade]`,
-          
-        // 5. Padroniza os formatos antes do concat para evitar erros de canais diferentes
-        `[corpo]aformat=sample_rates=44100:channel_layouts=stereo[corpo_fmt]`,
-        `[vinheta_fade]aformat=sample_rates=44100:channel_layouts=stereo[vinheta_fmt]`,
-        
-        // 6. Concatena o corpo com a vinheta sequencialmente
-        `[corpo_fmt][vinheta_fmt]concat=n=2:v=0:a=1[out]`
-      ].join(';');
+      filterComplex.push(`[${vozIdx}:a]adelay=${delayMs}|${delayMs}[voz_delay]`);
+      filterComplex.push(`[${trilhaIdx}:a]volume='if(lt(t,${delayVoz}),${volumeTrilha},${volumeDucking})':eval=frame,afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${fadeOutDuration},apad[trilha_ducked]`);
+      filterComplex.push(`[trilha_ducked][voz_delay]amix=inputs=2:duration=shortest:dropout_transition=0:normalize=0[corpo]`);
+      filterComplex.push(`[corpo]aformat=sample_rates=44100:channel_layouts=stereo[corpo_fmt]`);
+      concatSegments.push('[corpo_fmt]');
+
+      // 4. Vinheta Final
+      if (vinheta_finalPath) {
+        inputs.push(vinheta_finalPath);
+        const vinFinIdx = inputIndex++;
+        if (fadeVinheta > 0) {
+          filterComplex.push(`[${vinFinIdx}:a]afade=t=in:st=0:d=${fadeVinheta.toFixed(3)}[vin_fin_fade]`);
+          filterComplex.push(`[vin_fin_fade]aformat=sample_rates=44100:channel_layouts=stereo[vin_fin_fmt]`);
+        } else {
+          filterComplex.push(`[${vinFinIdx}:a]aformat=sample_rates=44100:channel_layouts=stereo[vin_fin_fmt]`);
+        }
+        concatSegments.push('[vin_fin_fmt]');
+      }
+
+      // 5. Concatena os segmentos presentes na ordem desejada
+      if (concatSegments.length === 1) {
+        filterComplex.push(`${concatSegments[0]}anull[out]`);
+      } else {
+        filterComplex.push(`${concatSegments.join('')}concat=n=${concatSegments.length}:v=0:a=1[out]`);
+      }
+
+      const filterComplexStr = filterComplex.join(';');
 
       // ── 7. Executar FFmpeg ───────────────────────────────
-      ffmpegCmd = ffmpeg()
-        .input(trilhaPath)
-        .input(vozPath)
-        .input(vinheta_finalPath)
-        .complexFilter(filterComplex)
+      ffmpegCmd = ffmpeg();
+
+      for (const inputPath of inputs) {
+        ffmpegCmd.input(inputPath);
+      }
+
+      ffmpegCmd
+        .complexFilter(filterComplexStr)
         .outputOptions([
           '-map [out]',
           '-ac 2',
