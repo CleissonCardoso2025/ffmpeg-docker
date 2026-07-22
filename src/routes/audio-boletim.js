@@ -267,7 +267,7 @@ router.post(
       const missing = [];
       if (!trilhaPath) missing.push('trilha');
       if (!vozPath) missing.push('voz');
-      if (!vinheta_finalPath) missing.push('vinheta_final');
+      // vinheta_final é opcional (se não fornecida, o boletim é montado normalmente com trilha + voz)
 
       if (missing.length > 0) {
         clearTimeout(timeoutId);
@@ -460,7 +460,7 @@ router.post(
 
       ffmpegCmd
         .on('start', (cmd) => {
-          console.log(`[montar-boletim] FilterComplex aplicado:\n${filterComplex.split(';').join(';\n')}`);
+          console.log(`[montar-boletim] FilterComplex aplicado:\n${filterComplex.join(';\n')}`);
           console.log(`[montar-boletim] FFmpeg comando completo: ${cmd}`);
         })
         .on('end', () => {
