@@ -99,15 +99,15 @@ function getAudioDuration(filePath) {
 
 /**
  * Monta um boletim de rádio combinando:
- *   - vinheta_inicio    → vinheta de abertura (opcional)
- *   - intro             → introdução em áudio (opcional)
- *   - trilha            → música de fundo
- *   - voz               → locução já normalizada
- *   - vinheta_final     → vinheta de encerramento
- *   - spot_patrocinador → áudio comercial/patrocinador (opcional, após vinheta_final)
+ *   - vinheta_inicio       → vinheta de abertura (opcional)
+ *   - intro                → introdução em áudio (opcional)
+ *   - trilha               → música de fundo
+ *   - voz                  → locução já normalizada
+ *   - vinheta_final        → vinheta de encerramento
+ *   - spot_patrocinador_*  → múltiplos spots patrocinadores (opcionais: spot_patrocinador, spot_patrocinador_1, spot_patrocinador_2, etc.)
  *
- * Sequence:
- *   [vinheta_inicio (opcional)] ──> [intro (opcional)] ──> [corpo: trilha + voz com ducking] ──> [vinheta_final] ──> [spot_patrocinador (opcional)]
+ * Sequence (padrão ou reordenável via parâmetro `ordem`):
+ *   [spot_patrocinador_inicio (opc)] ──> [vinheta_inicio (opc)] ──> [intro (opc)] ──> [corpo: trilha + voz] ──> [vinheta_final] ──> [spot_patrocinador_1] ──> [spot_patrocinador_2]
  */
 router.post(
   '/montar-boletim',
@@ -119,7 +119,15 @@ router.post(
     { name: 'voz', maxCount: 1 },
     { name: 'vinheta_final', maxCount: 1 },
     { name: 'spot_patrocinador', maxCount: 1 },
-    { name: 'spot patrocinador', maxCount: 1 }
+    { name: 'spot patrocinador', maxCount: 1 },
+    { name: 'spot_patrocinador_1', maxCount: 1 },
+    { name: 'spot patrocinador 1', maxCount: 1 },
+    { name: 'spot_patrocinador_2', maxCount: 1 },
+    { name: 'spot patrocinador 2', maxCount: 1 },
+    { name: 'spot_patrocinador_3', maxCount: 1 },
+    { name: 'spot patrocinador 3', maxCount: 1 },
+    { name: 'spot_patrocinador_inicio', maxCount: 1 },
+    { name: 'spot_patrocinador_final', maxCount: 1 }
   ]),
   async (req, res) => {
     const startTime = Date.now();
@@ -164,7 +172,7 @@ router.post(
       const crossfadeCorpoSpot = Math.max(0, parseFloat(req.body.crossfade_corpo_spot ?? req.body.crossfade_corpo_spot_patrocinador ?? 0) || 0);
 
       // Parâmetro de ordem customizada das peças (opcional)
-      const defaultOrder = ['vinheta_inicio', 'intro', 'corpo', 'vinheta_final', 'spot_patrocinador'];
+      const defaultOrder = ['spot_patrocinador_inicio', 'vinheta_inicio', 'intro', 'corpo', 'vinheta_final', 'spot_patrocinador', 'spot_patrocinador_1', 'spot_patrocinador_2', 'spot_patrocinador_3', 'spot_patrocinador_final'];
       let customOrder = defaultOrder;
       const rawOrdem = req.body.ordem ?? req.body.order ?? req.body.ordem_pecas;
       if (rawOrdem) {
@@ -229,13 +237,30 @@ router.post(
         return null;
       };
 
-      const [vinheta_inicioPath, introPath, trilhaPath, vozPath, vinheta_finalPath, spot_patrocinadorPath] = await Promise.all([
+      const [
+        vinheta_inicioPath,
+        introPath,
+        trilhaPath,
+        vozPath,
+        vinheta_finalPath,
+        spot_patrocinadorPath,
+        spot_patrocinador_1Path,
+        spot_patrocinador_2Path,
+        spot_patrocinador_3Path,
+        spot_patrocinador_inicioPath,
+        spot_patrocinador_finalPath
+      ] = await Promise.all([
         resolveInput('vinheta_inicio', ['vinheta inicio']),
         resolveInput('intro'),
         resolveInput('trilha'),
         resolveInput('voz'),
         resolveInput('vinheta_final'),
-        resolveInput('spot_patrocinador', ['spot patrocinador'])
+        resolveInput('spot_patrocinador', ['spot patrocinador']),
+        resolveInput('spot_patrocinador_1', ['spot patrocinador 1']),
+        resolveInput('spot_patrocinador_2', ['spot patrocinador 2']),
+        resolveInput('spot_patrocinador_3', ['spot patrocinador 3']),
+        resolveInput('spot_patrocinador_inicio'),
+        resolveInput('spot_patrocinador_final')
       ]);
 
       // ── 3. Validar presença dos arquivos obrigatórios ────
@@ -257,7 +282,7 @@ router.post(
       console.log(`[montar-boletim] Parâmetros: delay_voz=${delayVoz}s | fade_vinheta=${fadeVinheta}s`);
       console.log(`[montar-boletim] Ordem das peças: ${JSON.stringify(customOrder)}`);
       console.log(`[montar-boletim] Crossfades configurados: vinheta->intro=${crossfadeVinhetaIntro}s | intro->corpo=${crossfadeIntroCorpo}s | vinheta->corpo=${crossfadeVinhetaCorpo}s | corpo->final=${crossfadeCorpoVinhetaFinal}s | final->spot=${crossfadeVinhetaFinalSpot}s`);
-      console.log(`[montar-boletim] Peças ativas: inicio=${Boolean(vinheta_inicioPath)}, intro=${Boolean(introPath)}, final=${Boolean(vinheta_finalPath)}, spot_patrocinador=${Boolean(spot_patrocinadorPath)}`);
+      console.log(`[montar-boletim] Peças ativas: inicio=${Boolean(vinheta_inicioPath)}, intro=${Boolean(introPath)}, final=${Boolean(vinheta_finalPath)}, spot_patrocinador=${Boolean(spot_patrocinadorPath)}, spot_2=${Boolean(spot_patrocinador_2Path)}`);
 
       // ── 4. Obter a duração real da voz ──────────────────
       let vozDuration;
@@ -333,12 +358,24 @@ router.post(
         availableMap['vinheta_final'] = { id: 'vinheta_final', tag: '[vin_fin_fmt]' };
       }
 
-      // 5. Spot Patrocinador (opcional)
-      if (spot_patrocinadorPath) {
-        inputs.push(spot_patrocinadorPath);
-        const spotIdx = inputIndex++;
-        filterComplex.push(`[${spotIdx}:a]aformat=sample_rates=44100:channel_layouts=stereo[spot_pat_fmt]`);
-        availableMap['spot_patrocinador'] = { id: 'spot_patrocinador', tag: '[spot_pat_fmt]' };
+      // 5. Spots Patrocinador (opcionais, suporta múltiplos: spot_patrocinador, spot_patrocinador_1, spot_patrocinador_2, etc.)
+      const spotList = [
+        { key: 'spot_patrocinador_inicio', path: spot_patrocinador_inicioPath },
+        { key: 'spot_patrocinador_1', path: spot_patrocinador_1Path },
+        { key: 'spot_patrocinador', path: spot_patrocinadorPath },
+        { key: 'spot_patrocinador_2', path: spot_patrocinador_2Path },
+        { key: 'spot_patrocinador_3', path: spot_patrocinador_3Path },
+        { key: 'spot_patrocinador_final', path: spot_patrocinador_finalPath }
+      ];
+
+      for (const spot of spotList) {
+        if (spot.path) {
+          inputs.push(spot.path);
+          const spotIdx = inputIndex++;
+          const fmtTag = `[spot_${spot.key}_fmt]`;
+          filterComplex.push(`[${spotIdx}:a]aformat=sample_rates=44100:channel_layouts=stereo${fmtTag}`);
+          availableMap[spot.key] = { id: spot.key, tag: fmtTag };
+        }
       }
 
       // Ordena as peças ativas na ordem solicitada em customOrder
@@ -380,10 +417,14 @@ router.post(
             cfDuration = crossfadeIntroCorpo;
           } else if (leftSeg.id === 'corpo' && rightSeg.id === 'vinheta_final') {
             cfDuration = crossfadeCorpoVinhetaFinal;
-          } else if (leftSeg.id === 'vinheta_final' && rightSeg.id === 'spot_patrocinador') {
+          } else if (leftSeg.id === 'vinheta_final' && rightSeg.id.startsWith('spot')) {
             cfDuration = crossfadeVinhetaFinalSpot;
-          } else if (leftSeg.id === 'corpo' && rightSeg.id === 'spot_patrocinador') {
+          } else if (leftSeg.id === 'corpo' && rightSeg.id.startsWith('spot')) {
             cfDuration = crossfadeCorpoSpot;
+          } else {
+            const k1 = `crossfade_${leftSeg.id}_${rightSeg.id}`;
+            const k2 = `crossfade_${leftSeg.id.replace('spot_patrocinador', 'spot')}_${rightSeg.id.replace('spot_patrocinador', 'spot')}`;
+            cfDuration = Math.max(0, parseFloat(req.body[k1] ?? req.body[k2] ?? 0) || 0);
           }
 
           if (cfDuration > 0) {

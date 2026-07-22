@@ -573,7 +573,9 @@ curl -X POST http://localhost:9000/video/trim-from-url \
 | `trilha`                         | file ou URL    | —       | ✅           | Música de fundo (MP3). Upload via `multipart` ou URL no campo `trilha` |
 | `voz`                            | file ou URL    | —       | ✅           | Locução já normalizada (MP3)                                           |
 | `vinheta_final`                  | file ou URL    | —       | ✅           | Vinheta de encerramento (MP3)                                          |
-| `spot_patrocinador`              | file ou URL    | —       | ❌           | Áudio comercial do patrocinador (MP3, tocado após a `vinheta_final`)   |
+| `spot_patrocinador` / `spot_1`   | file ou URL    | —       | ❌           | Áudio comercial do patrocinador (MP3, tocado após `vinheta_final` por padrão) |
+| `spot_patrocinador_2`            | file ou URL    | —       | ❌           | Segundo áudio comercial (pode ser posicionado em qualquer lugar via `ordem`) |
+| `spot_patrocinador_inicio`       | file ou URL    | —       | ❌           | Spot comercial posicionado no início do boletim                              |
 | `delay_voz`                      | número (s)     | `9`     | ❌           | Segundos de silêncio antes da voz entrar (a trilha toca 100% nesse período) |
 | `volume_trilha_ducking`          | número (0–1)   | `0.3`   | ❌           | Volume da trilha quando a voz está tocando (0.3 = 30%)                 |
 | `fade_vinheta`                   | número (s)     | `0.3`   | ❌           | Duração do fade-in aplicado no início das vinhetas (sem crossfade)    |
@@ -582,7 +584,7 @@ curl -X POST http://localhost:9000/video/trim-from-url \
 | `crossfade_vinheta_corpo`        | número (s)     | `0`     | ❌           | Duração do crossfade em segundos entre `vinheta_inicio` e `corpo` (sem intro) |
 | `crossfade_vinheta_final`        | número (s)     | `0`     | ❌           | Duração do crossfade em segundos entre o `corpo` e a `vinheta_final`  |
 | `crossfade_vinheta_final_spot`   | número (s)     | `0`     | ❌           | Duração do crossfade em segundos entre `vinheta_final` e `spot_patrocinador` |
-| `ordem`                          | string/array   | —       | ❌           | Ordem personalizada das peças ex: `["spot_patrocinador", "vinheta_inicio", "intro", "corpo", "vinheta_final"]` ou string separada por vírgula |
+| `ordem`                          | string/array   | —       | ❌           | Ordem personalizada das peças ex: `["spot_patrocinador_1", "vinheta_inicio", "intro", "corpo", "vinheta_final", "spot_patrocinador_2"]` |
 
 **📤 Resposta:** `audio/mpeg` — arquivo MP3 pronto para veiculação, com headers `X-Processing-Time` e `X-File-Size-KB`.
 
