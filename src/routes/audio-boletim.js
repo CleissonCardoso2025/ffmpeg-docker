@@ -163,6 +163,24 @@ router.post(
       const crossfadeVinhetaFinalSpot = Math.max(0, parseFloat(req.body.crossfade_vinheta_final_spot ?? req.body.crossfade_final_spot ?? req.body.crossfade_spot_patrocinador ?? req.body.crossfade_spot ?? 0) || 0);
       const crossfadeCorpoSpot = Math.max(0, parseFloat(req.body.crossfade_corpo_spot ?? req.body.crossfade_corpo_spot_patrocinador ?? 0) || 0);
 
+      // Parâmetro de ordem customizada das peças (opcional)
+      const defaultOrder = ['vinheta_inicio', 'intro', 'corpo', 'vinheta_final', 'spot_patrocinador'];
+      let customOrder = defaultOrder;
+      const rawOrdem = req.body.ordem ?? req.body.order ?? req.body.ordem_pecas;
+      if (rawOrdem) {
+        if (Array.isArray(rawOrdem)) {
+          customOrder = rawOrdem;
+        } else if (typeof rawOrdem === 'string') {
+          try {
+            const parsed = JSON.parse(rawOrdem);
+            if (Array.isArray(parsed)) customOrder = parsed;
+            else customOrder = rawOrdem.split(',').map(s => s.trim());
+          } catch (_) {
+            customOrder = rawOrdem.split(',').map(s => s.trim());
+          }
+        }
+      }
+
       if (isNaN(delayVoz) || delayVoz < 0) {
         clearTimeout(timeoutId);
         return res.status(400).json({ error: '`delay_voz` deve ser um número >= 0', code: 'INVALID_PARAM' });
@@ -237,6 +255,7 @@ router.post(
 
       console.log(`[montar-boletim] Job ${jobId} iniciado.`);
       console.log(`[montar-boletim] Parâmetros: delay_voz=${delayVoz}s | fade_vinheta=${fadeVinheta}s`);
+      console.log(`[montar-boletim] Ordem das peças: ${JSON.stringify(customOrder)}`);
       console.log(`[montar-boletim] Crossfades configurados: vinheta->intro=${crossfadeVinhetaIntro}s | intro->corpo=${crossfadeIntroCorpo}s | vinheta->corpo=${crossfadeVinhetaCorpo}s | corpo->final=${crossfadeCorpoVinhetaFinal}s | final->spot=${crossfadeVinhetaFinalSpot}s`);
       console.log(`[montar-boletim] Peças ativas: inicio=${Boolean(vinheta_inicioPath)}, intro=${Boolean(introPath)}, final=${Boolean(vinheta_finalPath)}, spot_patrocinador=${Boolean(spot_patrocinadorPath)}`);
 
@@ -260,7 +279,7 @@ router.post(
       // ── 6. Montar filter_complex e inputs dinâmicos ──────
       const inputs = [];
       const filterComplex = [];
-      const activeSegments = [];
+      const availableMap = {};
       let inputIndex = 0;
 
       // 1. Vinheta Inicio (opcional)
@@ -273,7 +292,7 @@ router.post(
         } else {
           filterComplex.push(`[${vinIniIdx}:a]aformat=sample_rates=44100:channel_layouts=stereo[vin_ini_fmt]`);
         }
-        activeSegments.push({ id: 'vinheta_inicio', tag: '[vin_ini_fmt]' });
+        availableMap['vinheta_inicio'] = { id: 'vinheta_inicio', tag: '[vin_ini_fmt]' };
       }
 
       // 2. Intro (opcional)
@@ -281,7 +300,7 @@ router.post(
         inputs.push(introPath);
         const introIdx = inputIndex++;
         filterComplex.push(`[${introIdx}:a]aformat=sample_rates=44100:channel_layouts=stereo[intro_fmt]`);
-        activeSegments.push({ id: 'intro', tag: '[intro_fmt]' });
+        availableMap['intro'] = { id: 'intro', tag: '[intro_fmt]' };
       }
 
       // 3. Trilha e voz (obrigatórios)
@@ -299,7 +318,7 @@ router.post(
       filterComplex.push(`[${trilhaIdx}:a]volume='if(lt(t,${delayVoz}),${volumeTrilha},${volumeDucking})':eval=frame,afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${fadeOutDuration},apad[trilha_ducked]`);
       filterComplex.push(`[trilha_ducked][voz_delay]amix=inputs=2:duration=shortest:dropout_transition=0:normalize=0[corpo]`);
       filterComplex.push(`[corpo]aformat=sample_rates=44100:channel_layouts=stereo[corpo_fmt]`);
-      activeSegments.push({ id: 'corpo', tag: '[corpo_fmt]' });
+      availableMap['corpo'] = { id: 'corpo', tag: '[corpo_fmt]' };
 
       // 4. Vinheta Final
       if (vinheta_finalPath) {
@@ -311,15 +330,32 @@ router.post(
         } else {
           filterComplex.push(`[${vinFinIdx}:a]aformat=sample_rates=44100:channel_layouts=stereo[vin_fin_fmt]`);
         }
-        activeSegments.push({ id: 'vinheta_final', tag: '[vin_fin_fmt]' });
+        availableMap['vinheta_final'] = { id: 'vinheta_final', tag: '[vin_fin_fmt]' };
       }
 
-      // 5. Spot Patrocinador (opcional, após vinheta_final)
+      // 5. Spot Patrocinador (opcional)
       if (spot_patrocinadorPath) {
         inputs.push(spot_patrocinadorPath);
         const spotIdx = inputIndex++;
         filterComplex.push(`[${spotIdx}:a]aformat=sample_rates=44100:channel_layouts=stereo[spot_pat_fmt]`);
-        activeSegments.push({ id: 'spot_patrocinador', tag: '[spot_pat_fmt]' });
+        availableMap['spot_patrocinador'] = { id: 'spot_patrocinador', tag: '[spot_pat_fmt]' };
+      }
+
+      // Ordena as peças ativas na ordem solicitada em customOrder
+      const activeSegments = [];
+      for (const item of customOrder) {
+        const key = String(item).trim().toLowerCase().replace(/[\s\-]+/g, '_');
+        if (availableMap[key]) {
+          activeSegments.push(availableMap[key]);
+          delete availableMap[key];
+        }
+      }
+      if (availableMap['corpo']) {
+        activeSegments.push(availableMap['corpo']);
+        delete availableMap['corpo'];
+      }
+      for (const key of Object.keys(availableMap)) {
+        activeSegments.push(availableMap[key]);
       }
 
       // 6. Concatena / aplica crossfade entre os segmentos presentes na ordem

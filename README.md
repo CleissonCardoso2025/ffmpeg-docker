@@ -582,6 +582,7 @@ curl -X POST http://localhost:9000/video/trim-from-url \
 | `crossfade_vinheta_corpo`        | número (s)     | `0`     | ❌           | Duração do crossfade em segundos entre `vinheta_inicio` e `corpo` (sem intro) |
 | `crossfade_vinheta_final`        | número (s)     | `0`     | ❌           | Duração do crossfade em segundos entre o `corpo` e a `vinheta_final`  |
 | `crossfade_vinheta_final_spot`   | número (s)     | `0`     | ❌           | Duração do crossfade em segundos entre `vinheta_final` e `spot_patrocinador` |
+| `ordem`                          | string/array   | —       | ❌           | Ordem personalizada das peças ex: `["spot_patrocinador", "vinheta_inicio", "intro", "corpo", "vinheta_final"]` ou string separada por vírgula |
 
 **📤 Resposta:** `audio/mpeg` — arquivo MP3 pronto para veiculação, com headers `X-Processing-Time` e `X-File-Size-KB`.
 
