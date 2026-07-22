@@ -111,24 +111,17 @@ function getAudioDuration(filePath) {
  */
 router.post(
   '/montar-boletim',
-  upload.fields([
-    { name: 'vinheta_inicio', maxCount: 1 },
-    { name: 'vinheta inicio', maxCount: 1 },
-    { name: 'intro', maxCount: 1 },
-    { name: 'trilha', maxCount: 1 },
-    { name: 'voz', maxCount: 1 },
-    { name: 'vinheta_final', maxCount: 1 },
-    { name: 'spot_patrocinador', maxCount: 1 },
-    { name: 'spot patrocinador', maxCount: 1 },
-    { name: 'spot_patrocinador_1', maxCount: 1 },
-    { name: 'spot patrocinador 1', maxCount: 1 },
-    { name: 'spot_patrocinador_2', maxCount: 1 },
-    { name: 'spot patrocinador 2', maxCount: 1 },
-    { name: 'spot_patrocinador_3', maxCount: 1 },
-    { name: 'spot patrocinador 3', maxCount: 1 },
-    { name: 'spot_patrocinador_inicio', maxCount: 1 },
-    { name: 'spot_patrocinador_final', maxCount: 1 }
-  ]),
+  (req, res, next) => {
+    upload.any()(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({
+          error: `Erro no upload de arquivos: ${err.message}`,
+          code: 'UPLOAD_ERROR'
+        });
+      }
+      next();
+    });
+  },
   async (req, res) => {
     const startTime = Date.now();
     const jobId = uuidv4();
@@ -211,10 +204,14 @@ router.post(
         const names = [fieldName, ...alternateNames];
         let uploadedFile = null;
 
-        for (const name of names) {
-          if (req.files?.[name]?.[0]) {
-            uploadedFile = req.files[name][0];
-            break;
+        if (Array.isArray(req.files)) {
+          uploadedFile = req.files.find(f => names.includes(f.fieldname));
+        } else if (req.files) {
+          for (const name of names) {
+            if (req.files[name]?.[0]) {
+              uploadedFile = req.files[name][0];
+              break;
+            }
           }
         }
 
