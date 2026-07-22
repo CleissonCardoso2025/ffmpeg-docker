@@ -566,16 +566,20 @@ curl -X POST http://localhost:9000/video/trim-from-url \
 
 ## ⚙️ Parâmetros do Boletim de Rádio
 
-| Parâmetro                 | Tipo           | Padrão  | Obrigatório | Descrição                                                              |
-| ------------------------- | -------------- | ------- | ----------- | ---------------------------------------------------------------------- |
-| `vinheta_inicio`          | file ou URL    | —       | ❌           | Vinheta de abertura do boletim (MP3, tocada no início de tudo)         |
-| `intro`                   | file ou URL    | —       | ❌           | Introdução do boletim (MP3, tocada após vinheta_inicio e antes do corpo)|
-| `trilha`                  | file ou URL    | —       | ✅           | Música de fundo (MP3). Upload via `multipart` ou URL no campo `trilha` |
-| `voz`                     | file ou URL    | —       | ✅           | Locução já normalizada (MP3)                                           |
-| `vinheta_final`           | file ou URL    | —       | ✅           | Vinheta de encerramento (MP3)                                          |
-| `delay_voz`               | número (s)     | `9`     | ❌           | Segundos de silêncio antes da voz entrar (a trilha toca 100% nesse período) |
-| `volume_trilha_ducking`   | número (0–1)   | `0.3`   | ❌           | Volume da trilha quando a voz está tocando (0.3 = 30%)                 |
-| `fade_vinheta`            | número (s)     | `0.3`   | ❌           | Duração do fade-in aplicado no início das vinhetas (sem crossfade)    |
+| Parâmetro                        | Tipo           | Padrão  | Obrigatório | Descrição                                                              |
+| -------------------------------- | -------------- | ------- | ----------- | ---------------------------------------------------------------------- |
+| `vinheta_inicio`                 | file ou URL    | —       | ❌           | Vinheta de abertura do boletim (MP3, tocada no início de tudo)         |
+| `intro`                          | file ou URL    | —       | ❌           | Introdução do boletim (MP3, tocada após vinheta_inicio e antes do corpo)|
+| `trilha`                         | file ou URL    | —       | ✅           | Música de fundo (MP3). Upload via `multipart` ou URL no campo `trilha` |
+| `voz`                            | file ou URL    | —       | ✅           | Locução já normalizada (MP3)                                           |
+| `vinheta_final`                  | file ou URL    | —       | ✅           | Vinheta de encerramento (MP3)                                          |
+| `delay_voz`                      | número (s)     | `9`     | ❌           | Segundos de silêncio antes da voz entrar (a trilha toca 100% nesse período) |
+| `volume_trilha_ducking`          | número (0–1)   | `0.3`   | ❌           | Volume da trilha quando a voz está tocando (0.3 = 30%)                 |
+| `fade_vinheta`                   | número (s)     | `0.3`   | ❌           | Duração do fade-in aplicado no início das vinhetas (sem crossfade)    |
+| `crossfade_vinheta_intro`        | número (s)     | `0`     | ❌           | Duração do crossfade em segundos entre `vinheta_inicio` e `intro`      |
+| `crossfade_intro_corpo`          | número (s)     | `0`     | ❌           | Duração do crossfade em segundos entre `intro` e o `corpo` (trilha+voz)|
+| `crossfade_vinheta_corpo`        | número (s)     | `0`     | ❌           | Duração do crossfade em segundos entre `vinheta_inicio` e `corpo` (sem intro) |
+| `crossfade_vinheta_final`        | número (s)     | `0`     | ❌           | Duração do crossfade em segundos entre o `corpo` e a `vinheta_final`  |
 
 **📤 Resposta:** `audio/mpeg` — arquivo MP3 pronto para veiculação, com headers `X-Processing-Time` e `X-File-Size-KB`.
 

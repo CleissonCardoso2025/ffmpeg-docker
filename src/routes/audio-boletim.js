@@ -152,6 +152,12 @@ router.post(
       const volumeDucking = parseFloat(req.body.volume_trilha_ducking ?? 0.3);
       const fadeVinheta = parseFloat(req.body.fade_vinheta ?? 0.3);
 
+      // Parâmetros de Crossfade individuais (opcionais em segundos)
+      const crossfadeVinhetaIntro = Math.max(0, parseFloat(req.body.crossfade_vinheta_intro ?? req.body.crossfade_inicio_intro ?? 0) || 0);
+      const crossfadeIntroCorpo = Math.max(0, parseFloat(req.body.crossfade_intro_corpo ?? req.body.crossfade_intro ?? 0) || 0);
+      const crossfadeVinhetaCorpo = Math.max(0, parseFloat(req.body.crossfade_vinheta_corpo ?? req.body.crossfade_inicio_corpo ?? req.body.crossfade_vinheta_inicio ?? 0) || 0);
+      const crossfadeCorpoVinhetaFinal = Math.max(0, parseFloat(req.body.crossfade_corpo_vinheta_final ?? req.body.crossfade_vinheta_final ?? req.body.crossfade_final ?? 0) || 0);
+
       if (isNaN(delayVoz) || delayVoz < 0) {
         clearTimeout(timeoutId);
         return res.status(400).json({ error: '`delay_voz` deve ser um número >= 0', code: 'INVALID_PARAM' });
@@ -225,6 +231,7 @@ router.post(
 
       console.log(`[montar-boletim] Job ${jobId} iniciado.`);
       console.log(`[montar-boletim] Parâmetros: delay_voz=${delayVoz}s | fade_vinheta=${fadeVinheta}s`);
+      console.log(`[montar-boletim] Crossfades configurados: vinheta->intro=${crossfadeVinhetaIntro}s | intro->corpo=${crossfadeIntroCorpo}s | vinheta->corpo=${crossfadeVinhetaCorpo}s | corpo->final=${crossfadeCorpoVinhetaFinal}s`);
       console.log(`[montar-boletim] Vinhetas/Intro ativas: inicio=${Boolean(vinheta_inicioPath)}, intro=${Boolean(introPath)}, final=${Boolean(vinheta_finalPath)}`);
 
       // ── 4. Obter a duração real da voz ──────────────────
@@ -247,7 +254,7 @@ router.post(
       // ── 6. Montar filter_complex e inputs dinâmicos ──────
       const inputs = [];
       const filterComplex = [];
-      const concatSegments = [];
+      const activeSegments = [];
       let inputIndex = 0;
 
       // 1. Vinheta Inicio (opcional)
@@ -260,7 +267,7 @@ router.post(
         } else {
           filterComplex.push(`[${vinIniIdx}:a]aformat=sample_rates=44100:channel_layouts=stereo[vin_ini_fmt]`);
         }
-        concatSegments.push('[vin_ini_fmt]');
+        activeSegments.push({ id: 'vinheta_inicio', tag: '[vin_ini_fmt]' });
       }
 
       // 2. Intro (opcional)
@@ -268,7 +275,7 @@ router.post(
         inputs.push(introPath);
         const introIdx = inputIndex++;
         filterComplex.push(`[${introIdx}:a]aformat=sample_rates=44100:channel_layouts=stereo[intro_fmt]`);
-        concatSegments.push('[intro_fmt]');
+        activeSegments.push({ id: 'intro', tag: '[intro_fmt]' });
       }
 
       // 3. Trilha e voz (obrigatórios)
@@ -286,7 +293,7 @@ router.post(
       filterComplex.push(`[${trilhaIdx}:a]volume='if(lt(t,${delayVoz}),${volumeTrilha},${volumeDucking})':eval=frame,afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${fadeOutDuration},apad[trilha_ducked]`);
       filterComplex.push(`[trilha_ducked][voz_delay]amix=inputs=2:duration=shortest:dropout_transition=0:normalize=0[corpo]`);
       filterComplex.push(`[corpo]aformat=sample_rates=44100:channel_layouts=stereo[corpo_fmt]`);
-      concatSegments.push('[corpo_fmt]');
+      activeSegments.push({ id: 'corpo', tag: '[corpo_fmt]' });
 
       // 4. Vinheta Final
       if (vinheta_finalPath) {
@@ -298,14 +305,41 @@ router.post(
         } else {
           filterComplex.push(`[${vinFinIdx}:a]aformat=sample_rates=44100:channel_layouts=stereo[vin_fin_fmt]`);
         }
-        concatSegments.push('[vin_fin_fmt]');
+        activeSegments.push({ id: 'vinheta_final', tag: '[vin_fin_fmt]' });
       }
 
-      // 5. Concatena os segmentos presentes na ordem desejada
-      if (concatSegments.length === 1) {
-        filterComplex.push(`${concatSegments[0]}anull[out]`);
+      // 5. Concatena / aplica crossfade entre os segmentos presentes na ordem
+      if (activeSegments.length === 1) {
+        filterComplex.push(`${activeSegments[0].tag}anull[out]`);
       } else {
-        filterComplex.push(`${concatSegments.join('')}concat=n=${concatSegments.length}:v=0:a=1[out]`);
+        let currentStream = activeSegments[0].tag;
+        for (let i = 0; i < activeSegments.length - 1; i++) {
+          const leftSeg = activeSegments[i];
+          const rightSeg = activeSegments[i + 1];
+          const nextStream = rightSeg.tag;
+          const isLast = (i === activeSegments.length - 2);
+          const outputTag = isLast ? '[out]' : `[chain_${i}]`;
+
+          // Determina a duração do crossfade para a junção específica
+          let cfDuration = 0;
+          if (leftSeg.id === 'vinheta_inicio' && rightSeg.id === 'intro') {
+            cfDuration = crossfadeVinhetaIntro;
+          } else if (leftSeg.id === 'vinheta_inicio' && rightSeg.id === 'corpo') {
+            cfDuration = crossfadeVinhetaCorpo;
+          } else if (leftSeg.id === 'intro' && rightSeg.id === 'corpo') {
+            cfDuration = crossfadeIntroCorpo;
+          } else if (leftSeg.id === 'corpo' && rightSeg.id === 'vinheta_final') {
+            cfDuration = crossfadeCorpoVinhetaFinal;
+          }
+
+          if (cfDuration > 0) {
+            filterComplex.push(`${currentStream}${nextStream}acrossfade=d=${cfDuration.toFixed(3)}:c1=tri:c2=tri${outputTag}`);
+          } else {
+            filterComplex.push(`${currentStream}${nextStream}concat=n=2:v=0:a=1${outputTag}`);
+          }
+
+          currentStream = outputTag;
+        }
       }
 
       const filterComplexStr = filterComplex.join(';');
