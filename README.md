@@ -76,7 +76,7 @@ A API ficará disponível em `http://localhost:9000`
 
 | Endpoint                  | Método | Descrição                                                                                             | Parâmetros                                                                                   |
 | ------------------------- | ------ | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| 🆕 `/audio/montar-boletim` | POST   | **Monta um boletim de rádio completo** — combina vinheta inicio + intro + trilha + voz + vinheta final com ducking automático da trilha | `vinheta_inicio` (opc), `intro` (opc), `trilha`, `voz`, `vinheta_final`, `volume_trilha`, `delay_voz`, `volume_trilha_ducking`, `fade_vinheta` |
+| 🆕 `/audio/montar-boletim` | POST   | **Monta um boletim de rádio completo** — combina vinheta inicio + intro + trilha + voz + vinheta final + spot patrocinador com ducking da trilha | `vinheta_inicio` (opc), `intro` (opc), `trilha`, `voz`, `vinheta_final`, `spot_patrocinador` (opc), `delay_voz`, `crossfade_*` |
 
 ### ⚙️ Detalhes: /audio/montar-boletim
 
@@ -573,6 +573,7 @@ curl -X POST http://localhost:9000/video/trim-from-url \
 | `trilha`                         | file ou URL    | —       | ✅           | Música de fundo (MP3). Upload via `multipart` ou URL no campo `trilha` |
 | `voz`                            | file ou URL    | —       | ✅           | Locução já normalizada (MP3)                                           |
 | `vinheta_final`                  | file ou URL    | —       | ✅           | Vinheta de encerramento (MP3)                                          |
+| `spot_patrocinador`              | file ou URL    | —       | ❌           | Áudio comercial do patrocinador (MP3, tocado após a `vinheta_final`)   |
 | `delay_voz`                      | número (s)     | `9`     | ❌           | Segundos de silêncio antes da voz entrar (a trilha toca 100% nesse período) |
 | `volume_trilha_ducking`          | número (0–1)   | `0.3`   | ❌           | Volume da trilha quando a voz está tocando (0.3 = 30%)                 |
 | `fade_vinheta`                   | número (s)     | `0.3`   | ❌           | Duração do fade-in aplicado no início das vinhetas (sem crossfade)    |
@@ -580,6 +581,7 @@ curl -X POST http://localhost:9000/video/trim-from-url \
 | `crossfade_intro_corpo`          | número (s)     | `0`     | ❌           | Duração do crossfade em segundos entre `intro` e o `corpo` (trilha+voz)|
 | `crossfade_vinheta_corpo`        | número (s)     | `0`     | ❌           | Duração do crossfade em segundos entre `vinheta_inicio` e `corpo` (sem intro) |
 | `crossfade_vinheta_final`        | número (s)     | `0`     | ❌           | Duração do crossfade em segundos entre o `corpo` e a `vinheta_final`  |
+| `crossfade_vinheta_final_spot`   | número (s)     | `0`     | ❌           | Duração do crossfade em segundos entre `vinheta_final` e `spot_patrocinador` |
 
 **📤 Resposta:** `audio/mpeg` — arquivo MP3 pronto para veiculação, com headers `X-Processing-Time` e `X-File-Size-KB`.
 

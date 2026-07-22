@@ -99,14 +99,15 @@ function getAudioDuration(filePath) {
 
 /**
  * Monta um boletim de rádio combinando:
- *   - vinheta_inicio → vinheta de abertura (opcional)
- *   - intro          → introdução em áudio (opcional)
- *   - trilha         → música de fundo
- *   - voz            → locução já normalizada
- *   - vinheta_final  → vinheta de encerramento
+ *   - vinheta_inicio    → vinheta de abertura (opcional)
+ *   - intro             → introdução em áudio (opcional)
+ *   - trilha            → música de fundo
+ *   - voz               → locução já normalizada
+ *   - vinheta_final     → vinheta de encerramento
+ *   - spot_patrocinador → áudio comercial/patrocinador (opcional, após vinheta_final)
  *
  * Sequence:
- *   [vinheta_inicio (opcional)] ──> [intro (opcional)] ──> [corpo: trilha + voz com ducking] ──> [vinheta_final]
+ *   [vinheta_inicio (opcional)] ──> [intro (opcional)] ──> [corpo: trilha + voz com ducking] ──> [vinheta_final] ──> [spot_patrocinador (opcional)]
  */
 router.post(
   '/montar-boletim',
@@ -116,7 +117,9 @@ router.post(
     { name: 'intro', maxCount: 1 },
     { name: 'trilha', maxCount: 1 },
     { name: 'voz', maxCount: 1 },
-    { name: 'vinheta_final', maxCount: 1 }
+    { name: 'vinheta_final', maxCount: 1 },
+    { name: 'spot_patrocinador', maxCount: 1 },
+    { name: 'spot patrocinador', maxCount: 1 }
   ]),
   async (req, res) => {
     const startTime = Date.now();
@@ -157,6 +160,8 @@ router.post(
       const crossfadeIntroCorpo = Math.max(0, parseFloat(req.body.crossfade_intro_corpo ?? req.body.crossfade_intro ?? 0) || 0);
       const crossfadeVinhetaCorpo = Math.max(0, parseFloat(req.body.crossfade_vinheta_corpo ?? req.body.crossfade_inicio_corpo ?? req.body.crossfade_vinheta_inicio ?? 0) || 0);
       const crossfadeCorpoVinhetaFinal = Math.max(0, parseFloat(req.body.crossfade_corpo_vinheta_final ?? req.body.crossfade_vinheta_final ?? req.body.crossfade_final ?? 0) || 0);
+      const crossfadeVinhetaFinalSpot = Math.max(0, parseFloat(req.body.crossfade_vinheta_final_spot ?? req.body.crossfade_final_spot ?? req.body.crossfade_spot_patrocinador ?? req.body.crossfade_spot ?? 0) || 0);
+      const crossfadeCorpoSpot = Math.max(0, parseFloat(req.body.crossfade_corpo_spot ?? req.body.crossfade_corpo_spot_patrocinador ?? 0) || 0);
 
       if (isNaN(delayVoz) || delayVoz < 0) {
         clearTimeout(timeoutId);
@@ -206,12 +211,13 @@ router.post(
         return null;
       };
 
-      const [vinheta_inicioPath, introPath, trilhaPath, vozPath, vinheta_finalPath] = await Promise.all([
+      const [vinheta_inicioPath, introPath, trilhaPath, vozPath, vinheta_finalPath, spot_patrocinadorPath] = await Promise.all([
         resolveInput('vinheta_inicio', ['vinheta inicio']),
         resolveInput('intro'),
         resolveInput('trilha'),
         resolveInput('voz'),
-        resolveInput('vinheta_final')
+        resolveInput('vinheta_final'),
+        resolveInput('spot_patrocinador', ['spot patrocinador'])
       ]);
 
       // ── 3. Validar presença dos arquivos obrigatórios ────
@@ -231,8 +237,8 @@ router.post(
 
       console.log(`[montar-boletim] Job ${jobId} iniciado.`);
       console.log(`[montar-boletim] Parâmetros: delay_voz=${delayVoz}s | fade_vinheta=${fadeVinheta}s`);
-      console.log(`[montar-boletim] Crossfades configurados: vinheta->intro=${crossfadeVinhetaIntro}s | intro->corpo=${crossfadeIntroCorpo}s | vinheta->corpo=${crossfadeVinhetaCorpo}s | corpo->final=${crossfadeCorpoVinhetaFinal}s`);
-      console.log(`[montar-boletim] Vinhetas/Intro ativas: inicio=${Boolean(vinheta_inicioPath)}, intro=${Boolean(introPath)}, final=${Boolean(vinheta_finalPath)}`);
+      console.log(`[montar-boletim] Crossfades configurados: vinheta->intro=${crossfadeVinhetaIntro}s | intro->corpo=${crossfadeIntroCorpo}s | vinheta->corpo=${crossfadeVinhetaCorpo}s | corpo->final=${crossfadeCorpoVinhetaFinal}s | final->spot=${crossfadeVinhetaFinalSpot}s`);
+      console.log(`[montar-boletim] Peças ativas: inicio=${Boolean(vinheta_inicioPath)}, intro=${Boolean(introPath)}, final=${Boolean(vinheta_finalPath)}, spot_patrocinador=${Boolean(spot_patrocinadorPath)}`);
 
       // ── 4. Obter a duração real da voz ──────────────────
       let vozDuration;
@@ -308,7 +314,15 @@ router.post(
         activeSegments.push({ id: 'vinheta_final', tag: '[vin_fin_fmt]' });
       }
 
-      // 5. Concatena / aplica crossfade entre os segmentos presentes na ordem
+      // 5. Spot Patrocinador (opcional, após vinheta_final)
+      if (spot_patrocinadorPath) {
+        inputs.push(spot_patrocinadorPath);
+        const spotIdx = inputIndex++;
+        filterComplex.push(`[${spotIdx}:a]aformat=sample_rates=44100:channel_layouts=stereo[spot_pat_fmt]`);
+        activeSegments.push({ id: 'spot_patrocinador', tag: '[spot_pat_fmt]' });
+      }
+
+      // 6. Concatena / aplica crossfade entre os segmentos presentes na ordem
       if (activeSegments.length === 1) {
         filterComplex.push(`${activeSegments[0].tag}anull[out]`);
       } else {
@@ -330,6 +344,10 @@ router.post(
             cfDuration = crossfadeIntroCorpo;
           } else if (leftSeg.id === 'corpo' && rightSeg.id === 'vinheta_final') {
             cfDuration = crossfadeCorpoVinhetaFinal;
+          } else if (leftSeg.id === 'vinheta_final' && rightSeg.id === 'spot_patrocinador') {
+            cfDuration = crossfadeVinhetaFinalSpot;
+          } else if (leftSeg.id === 'corpo' && rightSeg.id === 'spot_patrocinador') {
+            cfDuration = crossfadeCorpoSpot;
           }
 
           if (cfDuration > 0) {
