@@ -6,6 +6,8 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { execSync, exec } = require('child_process');
+const https = require('https');
+const http = require('http');
 
 // Puppeteer (carregado sob demanda para não bloquear se Chromium não estiver presente)
 let puppeteer;
@@ -72,6 +74,62 @@ function formatTimestamp(seconds) {
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+function downloadUrl(url, destPath) {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(destPath);
+    const protocol = url.startsWith('https') ? https : http;
+
+    const request = protocol.get(url, response => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        file.close();
+        try { if (fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch (_) {}
+        downloadUrl(response.headers.location, destPath).then(resolve).catch(reject);
+        return;
+      }
+      if (response.statusCode !== 200) {
+        file.close();
+        try { if (fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch (_) {}
+        reject(new Error(`Falha ao baixar ${url}: HTTP ${response.statusCode}`));
+        return;
+      }
+      response.pipe(file);
+      file.on('finish', () => file.close(() => resolve(destPath)));
+    });
+
+    request.on('error', err => {
+      file.close();
+      try { if (fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch (_) {}
+      reject(new Error(`Erro de rede ao baixar ${url}: ${err.message}`));
+    });
+
+    request.setTimeout(60000, () => {
+      request.destroy();
+      file.close();
+      try { if (fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch (_) {}
+      reject(new Error(`Timeout ao baixar ${url}`));
+    });
+  });
+}
+
+function getAudioMetadata(filePath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) return reject(new Error(`ffprobe falhou em ${path.basename(filePath)}: ${err.message}`));
+      const duration = parseFloat(metadata?.format?.duration || 0);
+      let sampleRate = 44100;
+      let channels = 2;
+      if (metadata && metadata.streams) {
+        const audioStream = metadata.streams.find(s => s.codec_type === 'audio');
+        if (audioStream) {
+          if (audioStream.sample_rate) sampleRate = parseInt(audioStream.sample_rate, 10);
+          if (audioStream.channels) channels = parseInt(audioStream.channels, 10);
+        }
+      }
+      resolve({ duration, sampleRate, channels });
+    });
+  });
 }
 
 // ─────────────────────────────────────────────────────
@@ -450,42 +508,335 @@ app.post('/audio/mix', upload.fields([{name:'audio1'},{name:'audio2'}]), (req, r
     .save(output);
 });
 
-// Endpoint: Concatenar áudios (um depois do outro em sequência)
-app.post('/audio/concat', upload.array('audios', 10), (req, res) => {
-  const format = req.body.format || 'mp3';
-  const output = `/tmp/concat-audio-${Date.now()}.${format}`;
-  const listFile = `/tmp/concat-audio-list-${Date.now()}.txt`;
+// Endpoint: Concatenar áudios (um depois do outro em sequência com suporte avançado a URLs, filtros, crossfade, etc.)
+app.post('/audio/concat', upload.any(), async (req, res) => {
+  const startTime = Date.now();
+  const tempFilesToClean = [];
 
-  if (!req.files || req.files.length < 2) {
-    return res.status(400).json({ error: 'Envie pelo menos 2 arquivos de áudio (campo: audios).' });
+  try {
+    const files = req.files || [];
+    const body = req.body || {};
+
+    const rawItems = [];
+    const indexedMap = {};
+    const maxIndex = 20;
+
+    for (let i = 1; i <= maxIndex; i++) {
+      const keys = [`audio${i}`, `audio_${i}`, `audios[${i-1}]`, `audios[${i}]`];
+      
+      const fileMatch = files.find(f => keys.includes(f.fieldname));
+      if (fileMatch) {
+        indexedMap[i] = { type: 'file', path: fileMatch.path, key: fileMatch.fieldname, index: i };
+        continue;
+      }
+
+      for (const k of keys) {
+        if (body[k] && typeof body[k] === 'string' && body[k].trim() !== '') {
+          indexedMap[i] = { type: 'url_or_path', value: body[k].trim(), key: k, index: i };
+          break;
+        }
+      }
+    }
+
+    const indexedKeysCount = Object.keys(indexedMap).length;
+
+    if (indexedKeysCount >= 2) {
+      const sortedIndexes = Object.keys(indexedMap).map(Number).sort((a, b) => a - b);
+      for (const idx of sortedIndexes) {
+        rawItems.push(indexedMap[idx]);
+      }
+    } else {
+      const audiosFiles = files.filter(f => /^audios?(\[\])?$/i.test(f.fieldname) || /^audio/i.test(f.fieldname));
+      for (const f of audiosFiles) {
+        rawItems.push({ type: 'file', path: f.path, key: f.fieldname, index: rawItems.length + 1 });
+      }
+
+      let bodyAudios = body.audios || body['audios[]'];
+      if (bodyAudios) {
+        if (typeof bodyAudios === 'string') {
+          try {
+            const parsed = JSON.parse(bodyAudios);
+            if (Array.isArray(parsed)) bodyAudios = parsed;
+          } catch (_) {}
+        }
+        
+        if (Array.isArray(bodyAudios)) {
+          for (const item of bodyAudios) {
+            if (typeof item === 'string' && item.trim() !== '') {
+              rawItems.push({ type: 'url_or_path', value: item.trim(), key: 'audios', index: rawItems.length + 1 });
+            }
+          }
+        } else if (typeof bodyAudios === 'string' && bodyAudios.trim() !== '') {
+          rawItems.push({ type: 'url_or_path', value: bodyAudios.trim(), key: 'audios', index: rawItems.length + 1 });
+        }
+      }
+
+      if (rawItems.length < 2) {
+        for (const [k, v] of Object.entries(body)) {
+          if (/^audio/i.test(k) && !['audioCodec', 'audioBitrate'].includes(k)) {
+            if (typeof v === 'string' && v.trim() !== '' && !rawItems.some(it => it.key === k)) {
+              if (v.startsWith('http://') || v.startsWith('https://') || fs.existsSync(v)) {
+                rawItems.push({ type: 'url_or_path', value: v.trim(), key: k, index: rawItems.length + 1 });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (rawItems.length < 2) {
+      cleanupFiles(files.map(f => f.path));
+      return res.status(400).json({ error: 'Envie pelo menos 2 arquivos de áudio (usando audios[], audio1/audio2 ou campos com prefixo audio).' });
+    }
+
+    const inputs = [];
+
+    for (let idx = 0; idx < rawItems.length; idx++) {
+      const item = rawItems[idx];
+      const audioNumber = idx + 1;
+      let localPath = '';
+
+      if (item.type === 'file') {
+        localPath = item.path;
+        tempFilesToClean.push(localPath);
+      } else {
+        const val = item.value;
+        if (val.startsWith('http://') || val.startsWith('https://')) {
+          const downloadDest = path.join(uploadDir, `download-${Date.now()}-${uuidv4()}.tmp`);
+          tempFilesToClean.push(downloadDest);
+          await downloadUrl(val, downloadDest);
+          localPath = downloadDest;
+        } else if (fs.existsSync(val)) {
+          localPath = val;
+        } else {
+          cleanupFiles(tempFilesToClean);
+          cleanupFiles(files.map(f => f.path));
+          return res.status(400).json({ error: `O caminho ou URL de áudio é inválido: ${val}` });
+        }
+      }
+
+      const meta = await getAudioMetadata(localPath);
+
+      const volParam = body[`volume_audio${audioNumber}`] || body[`volume_audio_${audioNumber}`] || body[`volume_${audioNumber}`] || body[`volume_audio_${item.key}`];
+      const pitchParam = body[`pitch_audio${audioNumber}`] || body[`pitch_audio_${audioNumber}`] || body[`pitch_${audioNumber}`] || body[`pitch_audio_${item.key}`];
+      const speedParam = body[`speed_audio${audioNumber}`] || body[`speed_audio_${audioNumber}`] || body[`speed_${audioNumber}`] || body[`speed_audio_${item.key}`];
+
+      const volume = volParam !== undefined ? parseFloat(volParam) : 1.0;
+      const pitch = pitchParam !== undefined ? parseFloat(pitchParam) : 1.0;
+      const speed = speedParam !== undefined ? parseFloat(speedParam) : 1.0;
+
+      inputs.push({
+        filePath: localPath,
+        duration: meta.duration,
+        sampleRate: meta.sampleRate,
+        channels: meta.channels,
+        volume: isNaN(volume) ? 1.0 : volume,
+        pitch: isNaN(pitch) ? 1.0 : pitch,
+        speed: isNaN(speed) ? 1.0 : speed
+      });
+    }
+
+    let format = (body.format || 'mp3').toLowerCase();
+    const validFormats = ['mp3', 'wav', 'ogg'];
+    if (!validFormats.includes(format)) format = 'mp3';
+
+    const bitrate = body.bitrate || (format === 'mp3' ? '192k' : null);
+    const targetSampleRate = (body.sampleRate || body.sample_rate) ? parseInt(body.sampleRate || body.sample_rate, 10) : null;
+    const targetChannels = body.channels ? parseInt(body.channels, 10) : null;
+
+    const normalize = body.normalize === true || body.normalize === 'true' || body.normalize === '1';
+    const loudness = body.loudness !== undefined ? parseFloat(body.loudness) : -16;
+
+    let crossfadeDur = 0;
+    if (body.crossfade === true || body.crossfade === 'true') {
+      crossfadeDur = 0.5;
+    } else if (body.crossfade && !isNaN(parseFloat(body.crossfade))) {
+      crossfadeDur = parseFloat(body.crossfade);
+    }
+    if (body.crossfade_duration || body.crossfadeDuration) {
+      const dur = parseFloat(body.crossfade_duration || body.crossfadeDuration);
+      if (!isNaN(dur) && dur > 0) crossfadeDur = dur;
+    }
+
+    const silenceDur = body.silence ? parseFloat(body.silence) : 0;
+    const silenceStart = (body.silence_start || body.silenceStart) ? parseFloat(body.silence_start || body.silenceStart) : 0;
+    const silenceEnd = (body.silence_end || body.silenceEnd) ? parseFloat(body.silence_end || body.silenceEnd) : 0;
+
+    const fadeInDur = (body.fade_in === true || body.fade_in === 'true') ? 1.0 : (body.fade_in ? parseFloat(body.fade_in) : 0);
+    const fadeOutDur = (body.fade_out === true || body.fade_out === 'true') ? 1.0 : (body.fade_out ? parseFloat(body.fade_out) : 0);
+
+    const N = inputs.length;
+    const filterComplex = [];
+    const baseSampleRate = targetSampleRate || inputs[0].sampleRate || 44100;
+
+    for (let i = 0; i < N; i++) {
+      const inp = inputs[i];
+      const filters = [];
+
+      if (inp.pitch !== 1.0) {
+        const sr = inp.sampleRate || baseSampleRate;
+        const p = inp.pitch;
+        filters.push(`asetrate=${sr}*${p}`);
+        filters.push(`aresample=${sr}`);
+        filters.push(`atempo=${(1 / p).toFixed(4)}`);
+      }
+
+      if (inp.speed !== 1.0) {
+        const s = inp.speed;
+        if (s >= 0.5 && s <= 2.0) {
+          filters.push(`atempo=${s}`);
+        } else if (s > 2.0) {
+          filters.push(`atempo=2.0,atempo=${(s / 2.0).toFixed(4)}`);
+        } else if (s < 0.5) {
+          filters.push(`atempo=0.5,atempo=${(s / 0.5).toFixed(4)}`);
+        }
+      }
+
+      if (inp.volume !== 1.0) {
+        filters.push(`volume=${inp.volume}`);
+      }
+
+      if (i === 0 && fadeInDur > 0) {
+        filters.push(`afade=t=in:ss=0:d=${fadeInDur}`);
+      }
+
+      if (i === N - 1 && fadeOutDur > 0) {
+        const dur = inp.duration || 5;
+        const st = Math.max(0, dur - fadeOutDur).toFixed(3);
+        filters.push(`afade=t=out:st=${st}:d=${fadeOutDur}`);
+      }
+
+      filters.push(`aformat=sample_rates=${baseSampleRate}:channel_layouts=stereo`);
+      filterComplex.push(`[${i}:a]${filters.join(',')}[a${i}]`);
+    }
+
+    let lastLabel = '';
+
+    if (crossfadeDur > 0) {
+      let currentLabel = '[a0]';
+      for (let i = 1; i < N; i++) {
+        const nextLabel = `[a${i}]`;
+        const outLabel = (i === N - 1) ? '[cf_final]' : `[cf_${i}]`;
+        filterComplex.push(`${currentLabel}${nextLabel}acrossfade=d=${crossfadeDur}:c1=tri:c2=tri${outLabel}`);
+        currentLabel = outLabel;
+      }
+      lastLabel = '[cf_final]';
+
+      if (silenceStart > 0) {
+        filterComplex.push(`anullsrc=r=${baseSampleRate}:cl=stereo,atrim=duration=${silenceStart}[s_start]`);
+        filterComplex.push(`[s_start]${lastLabel}concat=n=2:v=0:a=1[cf_with_start]`);
+        lastLabel = '[cf_with_start]';
+      }
+      if (silenceEnd > 0) {
+        filterComplex.push(`anullsrc=r=${baseSampleRate}:cl=stereo,atrim=duration=${silenceEnd}[s_end]`);
+        filterComplex.push(`${lastLabel}[s_end]concat=n=2:v=0:a=1[cf_with_end]`);
+        lastLabel = '[cf_with_end]';
+      }
+    } else {
+      const concatStreams = [];
+
+      if (silenceStart > 0) {
+        filterComplex.push(`anullsrc=r=${baseSampleRate}:cl=stereo,atrim=duration=${silenceStart}[s_start]`);
+        concatStreams.push('[s_start]');
+      }
+
+      for (let i = 0; i < N; i++) {
+        concatStreams.push(`[a${i}]`);
+        if (silenceDur > 0 && i < N - 1) {
+          filterComplex.push(`anullsrc=r=${baseSampleRate}:cl=stereo,atrim=duration=${silenceDur}[s_${i}]`);
+          concatStreams.push(`[s_${i}]`);
+        }
+      }
+
+      if (silenceEnd > 0) {
+        filterComplex.push(`anullsrc=r=${baseSampleRate}:cl=stereo,atrim=duration=${silenceEnd}[s_end]`);
+        concatStreams.push('[s_end]');
+      }
+
+      filterComplex.push(`${concatStreams.join('')}concat=n=${concatStreams.length}:v=0:a=1[concat_out]`);
+      lastLabel = '[concat_out]';
+    }
+
+    let mapLabel = lastLabel;
+    if (normalize) {
+      filterComplex.push(`${lastLabel}loudnorm=I=${loudness}:TP=-1.5:LRA=11[norm_out]`);
+      mapLabel = '[norm_out]';
+    }
+
+    const output = path.join(uploadDir, `concat-audio-${Date.now()}-${uuidv4()}.${format}`);
+    tempFilesToClean.push(output);
+
+    let cmd = ffmpeg();
+    for (const inp of inputs) {
+      cmd.input(inp.filePath);
+    }
+
+    cmd.complexFilter(filterComplex);
+    cmd.map(mapLabel);
+
+    if (format === 'mp3') {
+      cmd.toFormat('mp3').audioCodec('libmp3lame');
+      if (bitrate) cmd.audioBitrate(bitrate);
+    } else if (format === 'ogg') {
+      cmd.toFormat('ogg').audioCodec('libvorbis');
+    } else {
+      cmd.toFormat('wav');
+    }
+
+    if (targetSampleRate) cmd.audioFrequency(targetSampleRate);
+    if (targetChannels) cmd.audioChannels(targetChannels);
+
+    let responseSent = false;
+
+    cmd
+      .on('end', async () => {
+        if (responseSent) return;
+        responseSent = true;
+
+        const elapsedMs = Date.now() - startTime;
+        const elapsedSec = (elapsedMs / 1000).toFixed(2);
+
+        let sizeKB = '0';
+        try {
+          const stat = fs.statSync(output);
+          sizeKB = (stat.size / 1024).toFixed(0);
+        } catch (_) {}
+
+        let outputDuration = 0;
+        try {
+          const outMeta = await getAudioMetadata(output);
+          outputDuration = outMeta.duration;
+        } catch (_) {}
+
+        let mimeType = 'audio/mpeg';
+        if (format === 'wav') mimeType = 'audio/wav';
+        if (format === 'ogg') mimeType = 'audio/ogg';
+
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Content-Disposition', `attachment; filename="concat.${format}"`);
+        res.setHeader('X-Processing-Time', `${elapsedSec}s`);
+        res.setHeader('X-File-Size-KB', sizeKB);
+        res.setHeader('X-Duration', `${outputDuration.toFixed(2)}s`);
+
+        res.download(output, `concat.${format}`, () => {
+          cleanupFiles(tempFilesToClean);
+        });
+      })
+      .on('error', (err) => {
+        if (responseSent) return;
+        responseSent = true;
+        cleanupFiles(tempFilesToClean);
+        res.status(500).json({ error: err.message });
+      })
+      .save(output);
+
+  } catch (err) {
+    cleanupFiles(tempFilesToClean);
+    if (req.files && Array.isArray(req.files)) {
+      cleanupFiles(req.files.map(f => f.path));
+    }
+    res.status(500).json({ error: err.message });
   }
-
-  const fileList = req.files.map(f => `file '${f.path}'`).join('\n');
-  fs.writeFileSync(listFile, fileList);
-
-  const cmd = ffmpeg()
-    .input(listFile)
-    .inputOptions(['-f concat', '-safe 0']);
-
-  if (format === 'mp3') {
-    cmd.audioCodec('libmp3lame').audioBitrate('192k').toFormat('mp3');
-  } else if (format === 'ogg') {
-    cmd.audioCodec('libvorbis').toFormat('ogg');
-  } else {
-    cmd.toFormat('wav');
-  }
-
-  cmd
-    .on('end', () => {
-      const filePaths = req.files.map(f => f.path);
-      res.download(output, () => cleanupFiles([...filePaths, listFile, output]));
-    })
-    .on('error', (err) => {
-      const filePaths = req.files.map(f => f.path);
-      cleanupFiles([...filePaths, listFile]);
-      res.status(500).json({ error: err.message });
-    })
-    .save(output);
 });
 
 // Endpoint: Adicionar Reverb

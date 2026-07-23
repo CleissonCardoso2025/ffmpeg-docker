@@ -67,7 +67,7 @@ A API ficará disponível em `http://localhost:9000`
 | Endpoint           | Método | Descrição                                                                      | Parâmetros                                     |
 | ------------------ | ------ | ------------------------------------------------------------------------------ | ---------------------------------------------- |
 | `/audio/mix`       | POST   | **Mixa 2 áudios** — toca os dois **ao mesmo tempo** (sobrepostos)              | `audio1`, `audio2` (form-data)                 |
-| `/audio/concat`    | POST   | **Concatena áudios em sequência** — junta 2 a 10 áudios **um depois do outro** | `audios[]` (form-data), `format` (mp3/wav/ogg) |
+| `/audio/concat`    | POST   | **Concatena áudios em sequência** — junta 2 a 20 áudios (arquivos locais, URLs ou mistos) | `audios[]`, `audio1`..`20`, `crossfade`, `silence`, `normalize`, `format`, `bitrate`, `sampleRate`, `channels`, `volume_audioX`, `pitch_audioX`, `speed_audioX` |
 | `/audio/crossfade` | POST   | **Crossfade entre 2 áudios** — transição suave do primeiro para o segundo      | `audio1`, `audio2` (form-data), `duration`     |
 
 | `/probe` | POST   | Retorna **informações técnicas** do arquivo: formato, codec, duração, bitrate | `file` (form-data) |
@@ -422,8 +422,44 @@ curl -X POST http://localhost:9000/video/html-to-mp4 \
   }' --output video.mp4
 ```
 
-### 🎵 Concatenar áudios em sequência
+### 🎵 Concatenar áudios em sequência (`POST /audio/concat`)
 
+O endpoint `/audio/concat` foi evoluído para aceitar tanto a forma de envio legada (`audios[]`), quanto múltiplos campos enumerados (`audio1`, `audio2`... `audio20` ou qualquer campo com prefixo `audio`). É possível enviar arquivos locais (upload multipart), URLs remotas (HTTP/HTTPS) ou uma mistura de ambos.
+
+#### 🛠️ Parâmetros Aceitos
+
+| Parâmetro | Tipo | Descrição | Padrão / Exemplo |
+| --- | --- | --- | --- |
+| `audios[]` | File / URL | Forma legada: array de arquivos multipart ou URLs | `audios=@intro.mp3` |
+| `audio1` ... `audio20` | File / URL | Campos individuais para cada áudio (upload ou URL) | `audio1=@a1.wav`, `audio2=https://...` |
+| `format` | String | Formato final de saída (`mp3`, `wav`, `ogg`) | `mp3` |
+| `bitrate` | String | Bitrate do áudio MP3 final | `192k` (padrão MP3), `320k`, `128k` |
+| `sampleRate` | Integer | Taxa de amostragem em Hz | `44100`, `48000` |
+| `channels` | Integer | Número de canais | `1` (mono), `2` (stereo) |
+| `normalize` | Boolean | Aplica masterização automática `loudnorm` | `true` ou `false` |
+| `loudness` | Number | Nível LUFS da normalização | `-16` |
+| `crossfade` | Boolean / Number | Crossfade automático entre todos os áudios (em segs ou `true` = 0.5s) | `true` ou `1.2` |
+| `crossfade_duration` | Number | Duração exata do crossfade em segundos | `0.8` |
+| `silence` | Number | Silêncio (em segundos) inserido entre cada áudio | `0.5` (500ms) |
+| `silence_start` | Number | Silêncio inserido no início do áudio final | `1.0` |
+| `silence_end` | Number | Silêncio inserido no final do áudio final | `1.0` |
+| `fade_in` | Boolean / Number | Fade-in aplicado apenas no primeiro áudio | `1.0` ou `true` |
+| `fade_out` | Boolean / Number | Fade-out aplicado apenas no último áudio | `1.0` ou `true` |
+| `volume_audio1`..`20` | Number | Volume individual do áudio N | `0.8`, `1.2` |
+| `pitch_audio1`..`20` | Number | Tom/Pitch individual do áudio N | `0.9` (grave), `1.1` (agudo) |
+| `speed_audio1`..`20` | Number | Velocidade individual do áudio N | `1.25` |
+
+#### 📊 Headers de Resposta Retornados
+
+- `X-Processing-Time`: Tempo de processamento (ex.: `0.45s`)
+- `X-File-Size-KB`: Tamanho do arquivo gerado em KB (ex.: `1240`)
+- `X-Duration`: Duração total do áudio final em segundos (ex.: `15.42s`)
+
+---
+
+#### 1. Exemplos com `curl`
+
+##### a) Forma Legada (Compatibilidade 100% com `audios[]`):
 ```bash
 curl -X POST http://localhost:9000/audio/concat \
   -F "audios=@intro.mp3" \
@@ -432,6 +468,105 @@ curl -X POST http://localhost:9000/audio/concat \
   -F "format=mp3" \
   --output podcast-completo.mp3
 ```
+
+##### b) Misto (Arquivos locais + URLs):
+```bash
+curl -X POST http://localhost:9000/audio/concat \
+  -F "audio1=@vinheta_local.wav" \
+  -F "audio2=https://meudominio.com/audios/noticia.mp3" \
+  -F "audio3=@encerramento.mp3" \
+  -F "format=mp3" \
+  -F "bitrate=320k" \
+  --output boletim_misto.mp3
+```
+
+##### c) Com Crossfade, Silêncio, Normalize, Sample Rate e Bitrate:
+```bash
+curl -X POST http://localhost:9000/audio/concat \
+  -F "audio1=@musica1.mp3" \
+  -F "audio2=@musica2.mp3" \
+  -F "crossfade=true" \
+  -F "crossfade_duration=1.2" \
+  -F "silence_start=0.5" \
+  -F "silence_end=1.0" \
+  -F "normalize=true" \
+  -F "loudness=-16" \
+  -F "sampleRate=48000" \
+  -F "bitrate=192k" \
+  -F "channels=2" \
+  --output mix_perfeito.mp3
+```
+
+---
+
+#### 2. Exemplos no Postman
+
+##### Opção A: Multipart Form-Data (Uploads + URLs + Parâmetros)
+Crie uma requisição `POST` para `http://localhost:9000/audio/concat`:
+1. Aba **Body** -> Selecione **form-data**
+2. Preencha as chaves desejadas:
+
+| KEY | TYPE | VALUE |
+| --- | --- | --- |
+| `audio1` | File | `intro.wav` (Selecione arquivo local) |
+| `audio2` | Text | `https://servidor.com/voz.mp3` |
+| `audio3` | File | `outro.wav` (Selecione arquivo local) |
+| `crossfade` | Text | `true` |
+| `crossfade_duration` | Text | `0.8` |
+| `volume_audio1` | Text | `0.9` |
+| `pitch_audio2` | Text | `1.1` |
+| `speed_audio3` | Text | `1.05` |
+| `normalize` | Text | `true` |
+| `format` | Text | `mp3` |
+| `bitrate` | Text | `320k` |
+| `sampleRate` | Text | `44100` |
+
+##### Opção B: JSON Body (para URLs)
+1. Aba **Headers**: `Content-Type: application/json`
+2. Aba **Body** -> Selecione **raw (JSON)**:
+```json
+{
+  "audio1": "https://meubucket.s3.amazonaws.com/intro.mp3",
+  "audio2": "https://meubucket.s3.amazonaws.com/noticia.mp3",
+  "audio3": "https://meubucket.s3.amazonaws.com/encerramento.mp3",
+  "crossfade": true,
+  "crossfade_duration": 1.0,
+  "silence": 0.5,
+  "normalize": true,
+  "format": "mp3",
+  "bitrate": "192k",
+  "sampleRate": 44100
+}
+```
+
+---
+
+#### 3. Exemplo de Integração no n8n
+
+No **n8n**, utilize o nó **HTTP Request**:
+
+- **Method**: `POST`
+- **URL**: `http://ffmpeg-api:3000/audio/concat`
+- **Send Body**: `true`
+- **Body Content Type**: `Form-Data` (ou `JSON` se utilizar apenas URLs)
+
+##### Exemplo de Payload Form-Data no n8n:
+```json
+{
+  "audio1": "={{ $json.url_vinheta }}",
+  "audio2": "={{ $json.url_locucao }}",
+  "audio3": "={{ $json.url_encerra }}",
+  "crossfade": "true",
+  "crossfade_duration": "1.0",
+  "normalize": "true",
+  "format": "mp3",
+  "bitrate": "192k",
+  "sampleRate": "44100"
+}
+```
+- **Response Format**: `File` (Binary) para receber e salvar o áudio concatenado final.
+
+---
 
 ### 🎙️ Gravação de Rádio Online / Streams Live
 
